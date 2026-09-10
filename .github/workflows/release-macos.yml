@@ -1,0 +1,147 @@
+name: Release Menso for macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: CFBundleShortVersionString in X.Y.Z form
+        required: true
+        type: string
+      build:
+        description: Monotonically increasing numeric CFBundleVersion
+        required: true
+        type: string
+      feed_url:
+        description: HTTPS URL of the published signed appcast
+        required: true
+        type: string
+      download_url_prefix:
+        description: HTTPS base URL for published DMGs and deltas
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  archive-sign-notarize:
+    runs-on: macos-15
+    environment: macos-release
+    steps:
+      # actions/checkout v4.2.2, pinned so a mutable tag cannot alter a
+      # credential-bearing release job.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Resolve pinned packages and archive release executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          macos/scripts/fetch-cua-driver.sh
+          swift build --package-path macos --configuration release --arch arm64
+          binary_path="$(swift build --package-path macos --configuration release --arch arm64 --show-bin-path)"
+          sparkle_framework="$(find macos/.build -type d -name Sparkle.framework -print -quit)"
+          webrtc_framework="$(find macos/.build -type d -path '*WebRTC.xcframework*macos*WebRTC.framework' -print -quit)"
+          if [[ -z "$webrtc_framework" && -d "$binary_path/WebRTC.framework" ]]; then
+            webrtc_framework="$binary_path/WebRTC.framework"
+          fi
+          if [[ ! -x "$binary_path/MensoApp" || -z "$sparkle_framework" || -z "$webrtc_framework" ]]; then
+            echo "release executable or embedded Sparkle/WebRTC framework is missing" >&2
+            exit 66
+          fi
+          macos/scripts/package-app.sh \
+            "$binary_path/MensoApp" \
+            "$sparkle_framework" \
+            "$webrtc_framework" \
+            archive-input
+          generate_appcast="$(find macos/.build -type f -path '*/sparkle/Sparkle/bin/generate_appcast' -perm -111 -print -quit)"
+          if [[ -z "$generate_appcast" ]]; then
+            echo "Sparkle 2.9.4 generate_appcast artifact is missing" >&2
+            exit 66
+          fi
+          printf 'MENSO_SPARKLE_GENERATE_APPCAST=%s\n' "$generate_appcast" >> "$GITHUB_ENV"
+
+      # Materialize credentials only after all dependency code has resolved and
+      # the unsigned executable has finished building.
+      - name: Require release secrets
+        shell: bash
+        env:
+          MENSO_DEVELOPER_ID_APPLICATION: ${{ secrets.MENSO_DEVELOPER_ID_APPLICATION }}
+          MENSO_DEVELOPER_ID_P12_BASE64: ${{ secrets.MENSO_DEVELOPER_ID_P12_BASE64 }}
+          MENSO_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MENSO_DEVELOPER_ID_P12_PASSWORD }}
+          MENSO_NOTARY_KEY_ID: ${{ secrets.MENSO_NOTARY_KEY_ID }}
+          MENSO_NOTARY_ISSUER_ID: ${{ secrets.MENSO_NOTARY_ISSUER_ID }}
+          MENSO_NOTARY_KEY_BASE64: ${{ secrets.MENSO_NOTARY_KEY_BASE64 }}
+          MENSO_SPARKLE_PUBLIC_ED_KEY: ${{ secrets.MENSO_SPARKLE_PUBLIC_ED_KEY }}
+          MENSO_SPARKLE_PRIVATE_ED_KEY_BASE64: ${{ secrets.MENSO_SPARKLE_PRIVATE_ED_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          for name in MENSO_DEVELOPER_ID_APPLICATION MENSO_DEVELOPER_ID_P12_BASE64 MENSO_DEVELOPER_ID_P12_PASSWORD MENSO_NOTARY_KEY_ID MENSO_NOTARY_ISSUER_ID MENSO_NOTARY_KEY_BASE64 MENSO_SPARKLE_PUBLIC_ED_KEY MENSO_SPARKLE_PRIVATE_ED_KEY_BASE64; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "missing required secret: $name" >&2
+              exit 78
+            fi
+          done
+
+      - name: Decode keys and import Developer ID identity
+        shell: bash
+        env:
+          MENSO_DEVELOPER_ID_APPLICATION: ${{ secrets.MENSO_DEVELOPER_ID_APPLICATION }}
+          MENSO_DEVELOPER_ID_P12_BASE64: ${{ secrets.MENSO_DEVELOPER_ID_P12_BASE64 }}
+          MENSO_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MENSO_DEVELOPER_ID_P12_PASSWORD }}
+          MENSO_NOTARY_KEY_BASE64: ${{ secrets.MENSO_NOTARY_KEY_BASE64 }}
+          MENSO_SPARKLE_PRIVATE_ED_KEY_BASE64: ${{ secrets.MENSO_SPARKLE_PRIVATE_ED_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_directory="$RUNNER_TEMP/menso-release-keys"
+          keychain_path="$RUNNER_TEMP/menso-release.keychain-db"
+          # Persist the deterministic cleanup target before any operation can
+          # partially create or populate the keychain. GITHUB_ENV makes it
+          # available to the later `if: always()` cleanup step even when this
+          # step exits during create/import/identity verification.
+          printf 'MENSO_RELEASE_KEYCHAIN=%s\n' "$keychain_path" >> "$GITHUB_ENV"
+          keychain_password="$(uuidgen)$(uuidgen)"
+          mkdir -p "$key_directory"
+          printf '%s' "$MENSO_DEVELOPER_ID_P12_BASE64" | /usr/bin/base64 -D > "$key_directory/developer-id.p12"
+          printf '%s' "$MENSO_NOTARY_KEY_BASE64" | /usr/bin/base64 -D > "$key_directory/AuthKey.p8"
+          printf '%s' "$MENSO_SPARKLE_PRIVATE_ED_KEY_BASE64" | /usr/bin/base64 -D > "$key_directory/sparkle-private-key"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$key_directory/developer-id.p12" -k "$keychain_path" -P "$MENSO_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path" | grep -F "$MENSO_DEVELOPER_ID_APPLICATION"
+
+      - name: Developer ID sign, notarize, staple, DMG, and signed appcast
+        env:
+          MENSO_DEVELOPER_ID_APPLICATION: ${{ secrets.MENSO_DEVELOPER_ID_APPLICATION }}
+          MENSO_NOTARY_KEY_ID: ${{ secrets.MENSO_NOTARY_KEY_ID }}
+          MENSO_NOTARY_ISSUER_ID: ${{ secrets.MENSO_NOTARY_ISSUER_ID }}
+          MENSO_NOTARY_KEY_PATH: ${{ runner.temp }}/menso-release-keys/AuthKey.p8
+          MENSO_SPARKLE_FEED_URL: ${{ inputs.feed_url }}
+          MENSO_SPARKLE_DOWNLOAD_URL_PREFIX: ${{ inputs.download_url_prefix }}
+          MENSO_SPARKLE_PUBLIC_ED_KEY: ${{ secrets.MENSO_SPARKLE_PUBLIC_ED_KEY }}
+          MENSO_SPARKLE_PRIVATE_ED_KEY_PATH: ${{ runner.temp }}/menso-release-keys/sparkle-private-key
+          MENSO_RELEASE_VERSION: ${{ inputs.version }}
+          MENSO_RELEASE_BUILD: ${{ inputs.build }}
+        run: macos/scripts/release-macos.sh archive-input/Menso.app release-output
+
+      # actions/upload-artifact v4.6.2.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: menso-macos-${{ inputs.version }}-${{ inputs.build }}
+          path: release-output/updates/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove temporary release credentials
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          # Keep the deterministic fallback so cleanup still works if writing
+          # GITHUB_ENV itself was the failure point.
+          keychain_path="${MENSO_RELEASE_KEYCHAIN:-$RUNNER_TEMP/menso-release.keychain-db}"
+          security delete-keychain "$keychain_path" 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/menso-release-keys"

@@ -1,0 +1,56 @@
+services:
+  menso-db:
+    image: agnohq/pgvector:18
+    container_name: menso-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    volumes:
+      - menso-pgdata:/var/lib/postgresql
+    environment:
+      POSTGRES_USER: ${DB_USER:-menso}
+      POSTGRES_PASSWORD: ${DB_PASS:-menso}
+      POSTGRES_DB: ${DB_DATABASE:-menso}
+    networks: [menso]
+
+  menso-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: menso-api
+    image: ${IMAGE_NAME:-menso-agentos}:${IMAGE_TAG:-latest}
+    command: >
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      --reload-dir agents --reload-dir app --reload-dir db --reload-dir evals
+      --reload-dir schemas --reload-dir tools --reload-dir workflows
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - path: .env
+        required: false
+      - path: .local-auth/runtime.env
+        required: false
+    environment:
+      RUNTIME_ENV: ${RUNTIME_ENV:-prd}
+      AGNO_DEBUG: ${AGNO_DEBUG:-False}
+      WAIT_FOR_DB: "True"
+      AGENTOS_URL: http://127.0.0.1:8000
+      AGENTOS_PUBLIC_URL: http://127.0.0.1:8000
+      DB_HOST: menso-db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-menso}
+      DB_PASS: ${DB_PASS:-menso}
+      DB_DATABASE: ${DB_DATABASE:-menso}
+    depends_on: [menso-db]
+    networks: [menso]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  menso:
+
+volumes:
+  menso-pgdata:

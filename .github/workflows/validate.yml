@@ -1,0 +1,36 @@
+name: Validate Menso
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "macos/**"
+      - ".github/workflows/validate.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "macos/**"
+      - ".github/workflows/validate.yml"
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/requirements.txt
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: uv pip install --system -r backend/requirements.txt
+      - run: uv pip install --system -e backend[dev]
+      - run: uv run ruff format --check backend
+      - run: uv run bash backend/scripts/validate.sh
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build --package-path macos

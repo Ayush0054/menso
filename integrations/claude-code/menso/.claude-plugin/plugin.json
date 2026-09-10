@@ -1,0 +1,9 @@
+{
+  "name": "menso",
+  "description": "Forwards Claude Code lifecycle and permission events to the local Menso app.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Menso"
+  }
+}
+

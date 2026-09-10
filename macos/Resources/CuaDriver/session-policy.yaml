@@ -1,0 +1,24 @@
+version: 1
+mode: bounded
+expires_after: 8h
+idle_timeout: 30m
+resources: {}
+allow:
+  tools:
+    - check_permissions
+    - start_session
+    - get_session_state
+    - end_session
+    - list_apps
+    - list_windows
+    - get_window_state
+    - launch_app
+    - bring_to_front
+    - click
+    - type_text
+    - press_key
+    - set_value
+deny:
+  tools: []
+ask:
+  tools: []

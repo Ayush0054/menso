@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Menso</string>
+    <key>CFBundleExecutable</key>
+    <string>MensoApp</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.menso.app</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleName</key>
+    <string>Menso</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Menso uses Automation only when you ask it to operate an app whose scripting interface is required.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Menso uses the microphone only while you dictate or start a voice conversation.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Menso uses Screen Recording only when you enable visual computer use, so it can inspect and verify the window you asked it to operate.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Menso uses on-device speech recognition only when that dictation engine is selected.</string>
+    <key>SUFeedURL</key>
+    <string>__MENSO_SPARKLE_FEED_URL__</string>
+    <key>SUPublicEDKey</key>
+    <string>__MENSO_SPARKLE_PUBLIC_ED_KEY__</string>
+    <key>SURequireSignedFeed</key>
+    <true/>
+    <key>SUSignedFeedFailureExpirationInterval</key>
+    <integer>0</integer>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>

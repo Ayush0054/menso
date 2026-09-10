@@ -1,0 +1,9 @@
+{
+  "archive_sha256": "c64017d5878d022df34137082fb918ae0d4304e28890569ff14458f1a54fd361",
+  "archive_url": "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.12.6/cua-driver-rs-0.12.6-darwin-arm64.tar.gz",
+  "binary_sha256": "3ee06efc14bb4ec501a4a8d8963514150684332f0281cc224c51b3dba3ef76ea",
+  "release_commit": "9eb1f481b8a12cd6ffda2ad5af21653a9e5aa9e5",
+  "release_tag": "cua-driver-rs-v0.12.6",
+  "session_policy_sha256": "4e1371fef7b210147782feffdb6c31ee2707884d1d5484d39cde861230d00707",
+  "version": "0.12.6"
+}

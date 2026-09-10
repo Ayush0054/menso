@@ -1,0 +1,41 @@
+.DS_Store
+macos/Resources/CuaDriver/cua-driver
+.env
+.env.*
+!.env.example
+!example.env
+
+# Python
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Swift / Xcode
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Runtime state and secrets
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.log
+*.pem
+*.key
+backend/.env.production
+backend/.env.local
+backend/.local-auth/
+
+# Packaging
+dist/
+build/
+*.dmg
+*.app.zip

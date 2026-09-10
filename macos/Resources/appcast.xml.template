@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Template only. Do not publish this empty feed and do not edit a generated
+  signed feed by hand. release-macos.sh copies this file, then Sparkle 2.9.x
+  generate_appcast replaces/adds signed items from notarized DMGs.
+-->
+<rss version="2.0"
+     xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Menso Updates</title>
+    <link>__MENSO_SPARKLE_FEED_URL__</link>
+    <description>Signed Menso releases for macOS.</description>
+    <language>en</language>
+  </channel>
+</rss>
