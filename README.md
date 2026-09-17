@@ -99,3 +99,7 @@ The floating widget, app/process monitoring, coding-agent dashboards, Claude hoo
 The TypeSafe migration is source-only: it has not been built, tested, installed, or exercised. Regression tests have been added but not run. Earlier GPT-Live checks do not validate this revision. See [implementation status](docs/IMPLEMENTATION_STATUS.md).
 
 The commands above are instructions, not evidence that setup or validation has succeeded. Repository contributors must obtain explicit user authorization before running tests, builds, linters, formatters, validation scripts, or live checks.
+
+## License
+
+Menso is licensed under the [MIT License](LICENSE). Third-party dependencies retain their respective licenses.
