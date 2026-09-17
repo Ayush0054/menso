@@ -500,6 +500,8 @@ public actor PolicyEngine {
         case (.backendAgent, _), (.backendWorkflow, _): false
         case (.voiceDelegation, .agent), (.voiceDelegation, .workflow): true
         case (.voiceDelegation, nil): false
+        case (.nativeVoice, nil): true
+        case (.nativeVoice, _): false
         case (.dictation, nil), (.claudeHook, nil), (.userInitiated, nil): true
         case (.dictation, _), (.claudeHook, _), (.userInitiated, _): false
         }

@@ -18,6 +18,21 @@ public struct ExternalActionRequestFactory: Sendable {
 
     public init() {}
 
+    /// Decode an untrusted proposal. This does NOT authorize execution; the
+    /// native context and local approval must bind it before makeAgentActionRequest.
+    func proposedVoiceAction(_ tool: AgentToolContinuation) throws -> TrustedVoiceActionAuthority {
+        guard let name = tool.toolName, Self.coreToolNames.contains(name) else {
+            throw ExternalActionRequestFactoryError.unsupportedTool
+        }
+        let arguments = try toolArguments(from: tool.fields)
+        try rejectAuthorityOverrides(in: arguments)
+        try validateArgumentKeys(toolName: name, arguments: arguments)
+        return try TrustedVoiceActionAuthority(
+            target: makeTarget(toolName: name, arguments: arguments),
+            operation: makeOperation(toolName: name, arguments: arguments)
+        )
+    }
+
     public func makeAgentActionRequest(
         continuation: AgentRunContinuation,
         toolCallID: String,

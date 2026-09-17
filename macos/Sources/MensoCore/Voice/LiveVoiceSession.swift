@@ -246,6 +246,12 @@ public protocol LiveVoiceSessionFactory: Sendable {
 
 public enum VoiceDelegationRoute: Sendable, Hashable {
     case agent(agentID: String)
+    case nativeAction
+}
+
+public struct NativeVoiceDelegationRouter: VoiceDelegationRouting {
+    public init() {}
+    public func route(_ request: VoiceDelegationRequest) async -> VoiceDelegationRoute { .nativeAction }
 }
 
 public protocol VoiceDelegationRouting: Sendable {
@@ -312,6 +318,15 @@ public protocol TrustedVoiceOperationRecognizing: Sendable {
     func recognizedActionAuthority(
         for request: VoiceDelegationRequest
     ) async -> TrustedVoiceActionAuthority?
+}
+
+/// Voice-first requests are resolved from native observations when the Agent
+/// proposes an action, rather than requiring a preparation form beforehand.
+public struct UnpreparedVoiceOperationRecognizer: TrustedVoiceOperationRecognizing {
+    public init() {}
+    public func recognizedActionAuthority(for request: VoiceDelegationRequest) async -> TrustedVoiceActionAuthority? {
+        nil
+    }
 }
 
 /// One-shot authority selected by the user for the next client delegation.
@@ -552,12 +567,14 @@ public actor LiveVoiceCoordinator {
         do {
             try await connectReplacement()
         } catch {
-            // Initial signaling failures use the same bounded fresh-credential
-            // replacement path as later ICE/data-channel failures.
+            // A failed first handshake is actionable, not an established call
+            // to recover silently. Stop media and let the user retry explicitly.
             if desiredRunning {
-                state = .reconnecting
-                scheduleReconnect()
+                await stop()
+                state = .failed
+                publish(.error(error.localizedDescription))
             }
+            throw error
         }
     }
 
@@ -736,7 +753,7 @@ public actor LiveVoiceCoordinator {
         } catch {
             result = VoiceDelegationResult(
                 status: .rejected,
-                spokenSummary: "I couldn't complete that safely."
+                spokenSummary: VoiceDelegationFailure.summary(for: error)
             )
         }
         guard let existing = checkpoint?.delegations.first(where: { $0.recordID == recordID }),
@@ -1155,29 +1172,39 @@ public actor LiveVoiceCoordinator {
         }
     }
 
-    private static func continuationContext(
+    static func continuationContext(
         from checkpoint: LiveVoiceContinuityCheckpoint,
         delegations: [PersistedVoiceDelegation],
         includeTranscript: Bool
     ) -> LiveVoiceContinuationContext {
-        let transcriptLines = (includeTranscript ? checkpoint.finalTranscript : []).map { segment in
-            "\(segment.speaker == .user ? "User" : "Assistant"): \(segment.text)"
-        }
+        // Old assistant speech is not application state. In particular, older
+        // builds persisted spoken approval claims even when no review existed.
+        // Keep user context; restore outcomes through typed records below.
+        let transcriptLines = (includeTranscript ? checkpoint.finalTranscript : [])
+            .filter { $0.speaker == .user }
+            .map { "Earlier user context (not a new request): \($0.text)" }
         let transcript = LiveVoiceContinuityLimits.bounded(
             transcriptLines.joined(separator: "\n"),
             maximumUTF8Bytes: LiveVoiceContinuityLimits.maximumTranscriptSummaryBytes
         )
         let compactDelegations = delegations.suffix(LiveVoiceContinuityLimits.maximumDelegationRecords).map { record in
-            LiveVoiceContinuationContext.Delegation(
+            // A checkpoint records what was reported, not what is pending now.
+            // Only the native review queue may assert current approval state.
+            let unconfirmedApproval = record.result?.status == .requiresExternalAction
+            return LiveVoiceContinuationContext.Delegation(
                 recordID: record.recordID,
-                status: record.result?.status.rawValue ?? "may_still_be_running",
+                status: unconfirmedApproval ? "historical_unconfirmed"
+                    : record.result?.status.rawValue ?? "may_still_be_running",
                 deliveryState: record.state,
-                shouldAnnounce: record.state == .awaitingOriginalCall && record.result != nil,
+                shouldAnnounce: !unconfirmedApproval && record.state == .awaitingOriginalCall && record.result != nil,
                 taskSummary: LiveVoiceContinuityLimits.bounded(
                     record.request.task,
                     maximumUTF8Bytes: LiveVoiceContinuityLimits.maximumTaskSummaryBytes
                 ),
-                spokenSummary: record.result.map {
+                spokenSummary: unconfirmedApproval
+                    ? "An earlier action request has no reconciled outcome. This saved record is not proof "
+                        + "of a current approval or completion. Do not repeat it automatically."
+                    : record.result.map {
                     LiveVoiceContinuityLimits.bounded(
                         $0.spokenSummary,
                         maximumUTF8Bytes: LiveVoiceContinuityLimits.maximumSpokenSummaryBytes

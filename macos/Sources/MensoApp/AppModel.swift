@@ -2,13 +2,12 @@ import AppKit
 import Foundation
 import MensoCore
 import Observation
-import UniformTypeIdentifiers
 
 @MainActor
 @Observable
 final class AppModel {
     enum Sheet: String, Identifiable {
-        case connections, action
+        case connections
         var id: String { rawValue }
     }
 
@@ -33,20 +32,10 @@ final class AppModel {
     var isWorking = false
     var isChangingVoice = false
     var resolvingActionIDs: Set<String> = []
-    var semanticActionKind: ApplicationSemanticActionKind = .openApplication
-    var semanticBundleIdentifier = ""
-    var semanticAppName = ""
-    var semanticActionText = ""
-    var semanticExpectedState = ""
-    var capturedSemanticTarget: FocusedApplicationTarget?
-    var semanticActionIsStagedForVoice = false
-    var stagedActionLabel: String?
-    var isCapturingTarget = false
 
     @ObservationIgnored private var runtimeTasks: [Task<Void, Never>] = []
-    @ObservationIgnored private var captureTask: Task<Void, Never>?
-    @ObservationIgnored private var stagedExpiryTask: Task<Void, Never>?
     @ObservationIgnored private var started = false
+    @ObservationIgnored var onReviewNeeded: (@MainActor () -> Void)?
 
     init(settingsStore: any SettingsPersisting, trustedRuntime: TrustedRuntime?) {
         self.trustedRuntime = trustedRuntime
@@ -64,7 +53,9 @@ final class AppModel {
         switch voiceState {
         case .idle, .disconnected: "Ready when you are"
         case .connecting: "Connecting…"
-        case .connected: isWorking ? "Working on your request" : "Conversation live"
+        case .connected:
+            !pendingActions.isEmpty ? "Waiting for your approval"
+                : isWorking ? "Working on your request" : "Conversation live"
         case .reconnecting: "Reconnecting…"
         case .disconnecting: "Ending conversation…"
         case .failed: "Couldn't connect"
@@ -78,7 +69,12 @@ final class AppModel {
         runtimeTasks.append(Task { [weak self] in
             for await actions in await runtime.pauseCoordinator.pendingActionUpdates() {
                 guard !Task.isCancelled else { return }
-                self?.pendingActions = actions
+                guard let self else { return }
+                let previous = Set(pendingActions.map(\.id))
+                pendingActions = actions
+                if isConversationActive, actions.contains(where: { !previous.contains($0.id) }) {
+                    onReviewNeeded?()
+                }
             }
         })
         runtimeTasks.append(Task { [weak self] in
@@ -111,9 +107,7 @@ final class AppModel {
                     case let .working(working):
                         isWorking = working
                         if working { latestResult = nil }
-                    case let .actionPrepared(prepared):
-                        semanticActionIsStagedForVoice = prepared
-                        if !prepared { stagedActionLabel = nil }
+                    case .actionPrepared: break // Legacy prepared-action sessions.
                     case let .result(result): latestResult = result
                     case let .error(text): message = text
                     }
@@ -123,8 +117,6 @@ final class AppModel {
     }
 
     func stop() {
-        captureTask?.cancel()
-        stagedExpiryTask?.cancel()
         runtimeTasks.forEach { $0.cancel() }
         runtimeTasks.removeAll()
         if let trustedRuntime { Task { await trustedRuntime.stop() } }
@@ -137,13 +129,12 @@ final class AppModel {
         Task { [weak self] in
             defer { self?.isChangingVoice = false }
             do { try await runtime.toggle() }
-            catch { self?.message = "Couldn't start the conversation. Check your microphone and connection." }
+            catch { self?.message = error.localizedDescription }
         }
     }
 
     func endConversation() {
         guard let runtime = trustedRuntime?.liveVoiceRuntime else { return }
-        clearPreparedAction()
         Task { await runtime.stop() }
     }
 
@@ -205,145 +196,6 @@ final class AppModel {
             } catch { self?.message = "Open System Settings to allow this permission for Menso." }
         }
     }
-
-    func chooseApplication() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.application]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Choose app"
-        guard panel.runModal() == .OK, let url = panel.url,
-              let bundle = Bundle(url: url), let identifier = bundle.bundleIdentifier else { return }
-        semanticBundleIdentifier = identifier
-        semanticAppName = url.deletingPathExtension().lastPathComponent
-        capturedSemanticTarget = nil
-    }
-
-    func captureSemanticTarget() {
-        guard !isCapturingTarget else { return }
-        isCapturingTarget = true
-        NSApp.hide(nil)
-        captureTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .seconds(3))
-                guard let self else { return }
-                defer {
-                    isCapturingTarget = false
-                    NSApp.unhide(nil)
-                    NSApp.activate(ignoringOtherApps: true)
-                }
-                let target = try MacOSTrustedSemanticTargetProvider(
-                    excludedBundleIdentifiers: [Bundle.main.bundleIdentifier ?? "com.menso.app"]
-                ).focusedTarget()
-                capturedSemanticTarget = target
-                semanticBundleIdentifier = target.bundleIdentifier
-                semanticAppName = NSWorkspace.shared.runningApplications.first {
-                    $0.bundleIdentifier == target.bundleIdentifier
-                }?.localizedName ?? target.bundleIdentifier
-            } catch {
-                self?.isCapturingTarget = false
-                self?.message = "Select an app window or text field, then capture it again."
-                NSApp.unhide(nil)
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        }
-    }
-
-    func stageSemanticActionForVoice() {
-        guard let store = trustedRuntime?.voiceActionAuthorityStore else { return }
-        do {
-            let bound = try makeSemanticActionBinding()
-            let label = semanticAppName.isEmpty ? semanticBundleIdentifier : semanticAppName
-            Task { [weak self] in
-                do {
-                    try await store.stage(
-                        target: .focusedApplication(bound.target),
-                        operation: .application(bound.operation),
-                        expiresAt: Date().addingTimeInterval(300)
-                    )
-                    guard let self else { return }
-                    semanticActionIsStagedForVoice = true
-                    stagedActionLabel = label
-                    presentedSheet = nil
-                    stagedExpiryTask?.cancel()
-                    stagedExpiryTask = Task { [weak self] in
-                        try? await Task.sleep(for: .seconds(300))
-                        guard !Task.isCancelled else { return }
-                        self?.clearPreparedAction()
-                    }
-                } catch { self?.message = "Couldn't prepare that action. Capture the target again." }
-            }
-        } catch { message = "Choose the exact app or control and complete the action first." }
-    }
-
-    func clearPreparedAction() {
-        semanticActionIsStagedForVoice = false
-        stagedActionLabel = nil
-        stagedExpiryTask?.cancel()
-        if let store = trustedRuntime?.voiceActionAuthorityStore { Task { await store.clear() } }
-    }
-
-    private func makeSemanticActionBinding() throws -> (
-        target: FocusedApplicationTarget,
-        operation: ApplicationSemanticOperation
-    ) {
-        let bundle = semanticBundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !bundle.isEmpty else { throw TrustedSemanticTargetError.unavailable }
-        switch semanticActionKind {
-        case .openApplication:
-            return (
-                FocusedApplicationTarget(bundleIdentifier: bundle),
-                ApplicationSemanticOperation(kind: .openApplication)
-            )
-        case .focusWindow:
-            guard let capturedSemanticTarget,
-                  capturedSemanticTarget.bundleIdentifier == bundle,
-                  capturedSemanticTarget.processIdentifier != nil,
-                  capturedSemanticTarget.windowTitle?.isEmpty == false
-            else { throw TrustedSemanticTargetError.unavailable }
-            return (
-                FocusedApplicationTarget(
-                    bundleIdentifier: bundle,
-                    processIdentifier: capturedSemanticTarget.processIdentifier,
-                    windowTitle: capturedSemanticTarget.windowTitle
-                ),
-                ApplicationSemanticOperation(kind: .focusWindow)
-            )
-        case .insertText:
-            guard let capturedSemanticTarget,
-                  capturedSemanticTarget.bundleIdentifier == bundle,
-                  ["AXTextField", "AXTextArea", "AXSearchField"].contains(
-                      capturedSemanticTarget.elementRole ?? ""
-                  ),
-                  capturedSemanticTarget.windowTitle?.isEmpty == false,
-                  capturedSemanticTarget.elementLabel?.isEmpty == false,
-                  !semanticActionText.isEmpty
-            else { throw TrustedSemanticTargetError.unavailable }
-            return (
-                capturedSemanticTarget,
-                ApplicationSemanticOperation(kind: .insertText, text: semanticActionText)
-            )
-        case .activateControl:
-            guard let capturedSemanticTarget,
-                  capturedSemanticTarget.bundleIdentifier == bundle,
-                  ["AXButton", "AXCheckBox", "AXRadioButton", "AXPopUpButton"].contains(
-                      capturedSemanticTarget.elementRole ?? ""
-                  ),
-                  capturedSemanticTarget.windowTitle?.isEmpty == false,
-                  capturedSemanticTarget.elementLabel?.isEmpty == false,
-                  !semanticExpectedState.isEmpty
-            else { throw TrustedSemanticTargetError.unavailable }
-            return (
-                capturedSemanticTarget,
-                ApplicationSemanticOperation(
-                    kind: .activateControl,
-                    expectedState: semanticExpectedState
-                )
-            )
-        }
-    }
-
     static func requiresApplicationsInstall(bundleURL: URL) -> Bool {
         guard bundleURL.pathExtension.lowercased() == "app" else { return false }
         let standardizedPath = bundleURL.standardizedFileURL.path

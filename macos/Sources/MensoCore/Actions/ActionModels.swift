@@ -339,6 +339,7 @@ public enum ActionSource: String, Codable, Hashable, Sendable {
     case backendAgent = "backend_agent"
     case backendWorkflow = "backend_workflow"
     case voiceDelegation = "voice_delegation"
+    case nativeVoice = "native_voice"
     case dictation
     case claudeHook = "claude_hook"
     case userInitiated = "user_initiated"

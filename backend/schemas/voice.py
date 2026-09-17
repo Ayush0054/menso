@@ -17,7 +17,24 @@ class DelegateToMensoRequest(BaseModel):
     operation_hint: Literal["open_ended", "desktop_action"]
 
 
+class MensoTaskResult(BaseModel):
+    """Model-authored terminal output, not a native approval or continuation.
+
+    A desktop request must call a semantic tool to create a real RunPaused
+    event. The model cannot manufacture a pending approval in its final JSON.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["completed", "rejected"]
+    spoken_summary: str = Field(min_length=1, max_length=1_000)
+    display_payload: dict[str, object] | None = None
+    action_receipts: list[ExternalExecutionResult] = Field(default_factory=list, max_length=20)
+
+
 class DelegateToMensoResult(BaseModel):
+    """Transport result; pending state and route metadata are owned by the Mac."""
+
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["completed", "requires_external_action", "rejected"]

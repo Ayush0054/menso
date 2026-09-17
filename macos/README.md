@@ -1,14 +1,14 @@
 # Menso for macOS
 
-Menso is a regular macOS 14+ desktop app with a Dock icon, one resizable window, native menus, and Settings. AppKit owns the window; SwiftUI shows a voice conversation, an exact-action preparation sheet, approve-once/decline decisions, and visible results.
+Menso is a regular macOS 14+ desktop app with a Dock icon, one resizable window, native menus, and Settings. AppKit owns the window; SwiftUI shows a voice conversation, approve-once/decline decisions, and visible results. There is no action preparation sheet.
 
 ## Current client
 
 - OpenAI `gpt-live-1` over native WebRTC with microphone input and speaker output.
 - SDP negotiation through the authenticated Menso backend; the provider key stays server-side.
-- Live transcript deltas, client delegation to the Menso Agent, bounded continuity and reconnects.
-- Four typed Mac actions: open app, focus window, insert exact text, set control.
-- Local approval, target/content binding, receipt verification, SQLite audit, durable continuation delivery.
+- Live transcript deltas, client delegation through TypeSafe candidate selection, bounded continuity and reconnects.
+- Four typed Mac actions requested by voice: open/switch app, focus a known window, insert text, set a focused control. Installed apps and focused Accessibility targets are resolved locally for each request.
+- Local approval, target/content binding, receipt verification, and SQLite audit. No AgentOS continuation in the active action path.
 - Settings for a server URL and product credentials. Secrets stay in device Keychain. Restart after changing credentials.
 - The microphone is off until you start a conversation. Ending it or closing the window stops voice. Accessibility is requested only for Mac actions.
 
@@ -16,11 +16,21 @@ The floating widget, monitoring, token dashboards, Claude hooks, dictation, lear
 
 ## Running after authorization
 
-Configure the backend with GPT-Live access and product JWT scopes `live:connect` and `agents:menso:run`. Existing `realtime:connect` tokens need reissuing. Debug builds can use the ignored `backend/.local-auth` token; release builds use Settings.
+Configure the backend with GPT-Live access, a server-only `TYPESAFE_API_KEY`, and product JWT scope `live:connect` (also authorizes the action selector). Existing `realtime:connect` tokens need reissuing. Debug builds can use the ignored `backend/.local-auth` token; release builds use Settings. No manual action preparation is needed. Text insertion supports literal dictated text, not generated drafts.
 
 The app must be packaged and installed in Applications for signed-app permissions and the embedded driver boundary. Command-line binary launches are not substitutes for TCC validation.
 
-No build, compiler, lint, formatter, test, preview, or live voice/action check was run for this change. SwiftUI guidance informed the single-window layout; visual behavior is still unverified.
+For a local Apple Silicon debug build, from the repository root:
+
+```sh
+swift build --package-path macos --arch arm64
+zsh macos/scripts/package-debug-app.sh
+open macos/.build/local-app
+```
+
+Quit the existing Menso app, then move the freshly packaged app into Applications and launch that copy. The packaging script asks SwiftPM for its current output directory; do not manually copy from a cached architecture directory. Rebuilding an ad-hoc signed app can require renewed macOS permissions.
+
+Earlier desktop/GPT-Live checks predate this migration. The TypeSafe path has not been built, installed, or tested. Pending native reviews expire after three minutes and are not restored after quitting; ask again after restart. Terminal results and execution reservations remain in SQLite. See [validation scope](../docs/IMPLEMENTATION_STATUS.md).
 
 ## Release infrastructure
 

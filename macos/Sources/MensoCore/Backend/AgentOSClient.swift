@@ -384,49 +384,15 @@ public actor AuthenticatedAgentOSRunClient: AgentOSRunClient {
         bytes: URLSession.AsyncBytes,
         continuation: AgentOSEventStream.Continuation
     ) async throws {
-        var eventID: String?
-        var eventName: String?
-        var dataLines: [String] = []
-        var retry: Int?
-
-        func emit() {
-            guard eventID != nil || eventName != nil || !dataLines.isEmpty || retry != nil else { return }
-            continuation.yield(
-                ServerSentEvent(
-                    id: eventID,
-                    event: eventName,
-                    data: dataLines.joined(separator: "\n"),
-                    retryMilliseconds: retry
-                )
-            )
-            eventID = nil
-            eventName = nil
-            dataLines.removeAll(keepingCapacity: true)
-            retry = nil
-        }
-
-        for try await rawLine in bytes.lines {
+        var decoder = AgentOSServerSentEventDecoder()
+        for try await byte in bytes {
             try Task.checkCancellation()
-            if rawLine.isEmpty {
-                emit()
-                continue
-            }
-            if rawLine.hasPrefix(":") { continue }
-
-            let pieces = rawLine.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-            let field = String(pieces[0])
-            var value = pieces.count == 2 ? String(pieces[1]) : ""
-            if value.hasPrefix(" ") { value.removeFirst() }
-
-            switch field {
-            case "id": eventID = value
-            case "event": eventName = value
-            case "data": dataLines.append(value)
-            case "retry": retry = Int(value)
-            default: continue
+            if let event = try decoder.append(byte) {
+                continuation.yield(event)
             }
         }
-        emit()
+        // An unterminated event is not a complete server result.
+        try decoder.finish()
     }
 }
 

@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         installMenu()
+        showWindow()
         launchTask = Task { [weak self] in await self?.finishLaunching() }
     }
 
@@ -36,6 +37,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         guard !Task.isCancelled else { return }
         appModel = model
+        model.onReviewNeeded = { [weak self] in
+            self?.window?.deminiaturize(nil)
+            self?.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        window?.contentView = NSHostingView(rootView: MensoRootView(model: model))
+        model.start()
+    }
+
+    private func showWindow() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 820, height: 680),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -46,11 +57,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.minSize = NSSize(width: 600, height: 520)
         window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("MensoDesktopWindow")
-        window.contentView = NSHostingView(rootView: MensoRootView(model: model))
+        window.contentView = NSHostingView(rootView:
+            VStack(spacing: 16) {
+                ProgressView()
+                Text("Connecting to Menso…").foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        )
         window.delegate = self
         if !window.setFrameUsingName("MensoDesktopWindow") { window.center() }
         self.window = window
-        model.start()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -121,29 +137,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case let .agentOS(agentOS, notice):
             do {
                 let identity = try await agentOS.authenticatedContextProvider.authenticatedProductContext()
-                let router = try RegisteredVoiceDelegationRouter(agentID: MensoAgentOSVoiceDelegationBridge.agentID)
+                let router = NativeVoiceDelegationRouter()
                 let format = try LiveVoiceAudioFormat(sampleRate: 48_000, channelCount: 1, encoding: .linearPCM16)
-                let runtime = try TrustedRuntime(database: database, agentOS: agentOS.configuration, cuaDriverHost: driver) { context in
+                let runtime = TrustedRuntime(database: database, cuaDriverHost: driver) { database, policy, executor, reviews in
                     guard let access = agentOS.liveVoiceClientAccessProvider else { return TrustedRuntimeFeatures() }
-                    let authority = UserStagedVoiceActionAuthorityStore()
                     let coordinator = LiveVoiceCoordinator(
                         userID: identity.userID,
                         sessionID: identity.sessionID,
                         accessProvider: access,
                         sessionFactory: OpenAILiveWebRTCSessionFactory(),
                         router: router,
-                        operationRecognizer: authority,
-                        delegationBridge: MensoAgentOSVoiceDelegationBridge(
-                            client: context.runClient,
-                            streamHandler: context.streamHandler,
-                            authenticatedContextProvider: context.authenticatedContextProvider,
-                            actionResultStore: context.database.actionStore
+                        operationRecognizer: UnpreparedVoiceOperationRecognizer(),
+                        delegationBridge: TypeSafeVoiceDelegationBridge(
+                            selector: agentOS.actionSelector,
+                            authenticatedContextProvider: agentOS.authenticatedContextProvider,
+                            actionContextProvider: MacOSVoiceActionContextProvider(),
+                            policyEngine: policy, executor: executor, reviews: reviews
                         ),
-                        checkpointStore: SettingsLiveVoiceCheckpointStore(database: context.database)
+                        checkpointStore: SettingsLiveVoiceCheckpointStore(database: database)
                     )
                     return TrustedRuntimeFeatures(
-                        liveVoiceRuntime: ConfiguredLiveVoiceRuntimeController(coordinator: coordinator, inputFormat: format),
-                        voiceActionAuthorityStore: authority
+                        liveVoiceRuntime: ConfiguredLiveVoiceRuntimeController(coordinator: coordinator, inputFormat: format)
                     )
                 }
                 return (runtime, notice)

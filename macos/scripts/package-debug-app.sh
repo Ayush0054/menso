@@ -7,7 +7,9 @@ set -euo pipefail
 
 script_directory="${0:A:h}"
 macos_root="${script_directory:h}"
-binary_directory="$macos_root/.build/arm64-apple-macosx/debug"
+# SwiftPM's output layout depends on the active build system/toolchain. Never
+# select an old architecture directory that can survive a successful rebuild.
+binary_directory="$(swift build --package-path "$macos_root" --configuration debug --arch arm64 --show-bin-path)"
 output_root="$macos_root/.build/local-app"
 bundle_path="$output_root/Menso.app"
 

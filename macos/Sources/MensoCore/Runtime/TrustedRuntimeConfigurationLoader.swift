@@ -9,18 +9,18 @@ public enum TrustedRuntimeConfigurationLoadResult: Sendable {
 }
 
 public struct LoadedTrustedAgentOSConfiguration: Sendable {
-    public let configuration: TrustedAgentOSRuntimeConfiguration
     public let authenticatedContextProvider: any AuthenticatedProductContextProviding
     public let liveVoiceClientAccessProvider: (any LiveVoiceClientAccessProviding)?
+    public let actionSelector: any VoiceActionSelecting
 
     public init(
-        configuration: TrustedAgentOSRuntimeConfiguration,
         authenticatedContextProvider: any AuthenticatedProductContextProviding,
-        liveVoiceClientAccessProvider: (any LiveVoiceClientAccessProviding)?
+        liveVoiceClientAccessProvider: (any LiveVoiceClientAccessProviding)?,
+        actionSelector: any VoiceActionSelecting
     ) {
-        self.configuration = configuration
         self.authenticatedContextProvider = authenticatedContextProvider
         self.liveVoiceClientAccessProvider = liveVoiceClientAccessProvider
+        self.actionSelector = actionSelector
     }
 }
 
@@ -147,10 +147,6 @@ public struct TrustedRuntimeConfigurationLoader: Sendable {
             guard !verifiedContext.userID.rawValue.isEmpty else {
                 throw TrustedRuntimeConfigurationLoaderError.invalidSettings
             }
-            let client = AuthenticatedAgentOSRunClient(
-                configuration: connection,
-                tokenProvider: tokenProvider
-            )
             let liveVoiceClientAccessProvider: (any LiveVoiceClientAccessProviding)?
             let liveVoiceNotice: String?
             if verifiedContext.scopes.contains("agent_os:admin")
@@ -168,12 +164,9 @@ public struct TrustedRuntimeConfigurationLoader: Sendable {
 
             return .agentOS(
                 LoadedTrustedAgentOSConfiguration(
-                    configuration: TrustedAgentOSRuntimeConfiguration(
-                        client: client,
-                        authenticatedContextProvider: context
-                    ),
                     authenticatedContextProvider: context,
-                    liveVoiceClientAccessProvider: liveVoiceClientAccessProvider
+                    liveVoiceClientAccessProvider: liveVoiceClientAccessProvider,
+                    actionSelector: TypeSafeActionSelector(configuration: connection, tokenProvider: tokenProvider)
                 ),
                 notice: liveVoiceNotice
             )

@@ -1,8 +1,9 @@
 import Foundation
 
-/// App-owned authority prepared before an Agent run crosses the network. An
-/// open-ended run may omit `expectedTarget`; any later CUA pause then fails
-/// closed. A desktop-action run carries the exact locally recognized target.
+/// App-owned authority prepared before an Agent run crosses the network. A
+/// voice run may carry native observations instead of a preselected operation.
+/// Its first proposal is matched locally, persisted, and reviewed before use.
+/// Runs with neither an exact binding nor native context fail closed.
 public struct TrustedAgentRunStart: Codable, Sendable, Hashable {
     public let launchID: String
     public let agentID: String
@@ -11,6 +12,8 @@ public struct TrustedAgentRunStart: Codable, Sendable, Hashable {
     public let expectedTarget: ActionTarget?
     public let expectedOperation: ActionOperation?
     public let expiresAt: Date
+    public let voiceActionContext: VoiceActionContext?
+    public let resolvedToolCallID: String?
 
     public init(
         launchID: String,
@@ -19,7 +22,9 @@ public struct TrustedAgentRunStart: Codable, Sendable, Hashable {
         authenticatedSessionID: ProductSessionID,
         expectedTarget: ActionTarget?,
         expectedOperation: ActionOperation?,
-        expiresAt: Date
+        expiresAt: Date,
+        voiceActionContext: VoiceActionContext? = nil,
+        resolvedToolCallID: String? = nil
     ) {
         self.launchID = launchID
         self.agentID = agentID
@@ -28,6 +33,8 @@ public struct TrustedAgentRunStart: Codable, Sendable, Hashable {
         self.expectedTarget = expectedTarget
         self.expectedOperation = expectedOperation
         self.expiresAt = expiresAt
+        self.voiceActionContext = voiceActionContext
+        self.resolvedToolCallID = resolvedToolCallID
     }
 }
 
@@ -61,6 +68,7 @@ public enum AgentOSRunStreamIngestorError: Error, Sendable, Equatable {
     case malformedEvent(String)
     case unexpectedRun(String)
     case authorityUnavailable
+    case macControlPermissionRequired
     case authorityConflict
     case unsupportedPause
     case ambiguousPause
@@ -125,6 +133,7 @@ public actor TrustedRunAuthorityRegistry {
 
     private let persistence: (any TrustedRunAuthorityPersisting)?
     private var agentRuns: [String: TrustedAgentRunStart] = [:]
+    private var authorizingRuns: Set<String> = []
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
@@ -188,33 +197,70 @@ public actor TrustedRunAuthorityRegistry {
         startedWith prepared: TrustedAgentRunStart?
     ) async throws -> AgentExternalExecutionPause {
         let key = runKey(agentID: continuation.agentID, runID: continuation.runID)
-        guard let start = try await authority(for: key) ?? prepared else {
+        guard authorizingRuns.insert(key).inserted else {
+            throw AgentOSRunStreamIngestorError.authorityConflict
+        }
+        defer { authorizingRuns.remove(key) }
+        guard var start = try await authority(for: key) ?? prepared else {
             throw AgentOSRunStreamIngestorError.authorityUnavailable
         }
-        if let prepared, prepared != start {
-            throw AgentOSRunStreamIngestorError.authorityConflict
+        if let prepared {
+            guard start.launchID == prepared.launchID,
+                  try await authority(for: launchKey(prepared.launchID)) == prepared
+            else { throw AgentOSRunStreamIngestorError.authorityConflict }
         }
         guard start.expiresAt > Date(),
               continuation.agentID == start.agentID,
               continuation.userID == start.authenticatedUserID,
               continuation.sessionID == start.authenticatedSessionID
         else { throw AgentOSRunStreamIngestorError.unexpectedRun("agent authority") }
-        guard let target = start.expectedTarget, let operation = start.expectedOperation else {
-            throw AgentOSRunStreamIngestorError.authorityUnavailable
-        }
-        let candidates = continuation.tools.filter {
-            $0.isUnresolvedExternalExecution
-                && ($0.toolName.map(Self.supportedTools.contains) ?? false)
-                && $0.toolName == operation.semanticToolName
-        }
+        let candidates = continuation.tools.filter(\.isUnresolvedExternalExecution)
         guard candidates.count == 1, let tool = candidates.first,
               let toolCallID = tool.toolCallID,
-              let toolName = tool.toolName
+              let toolName = tool.toolName, Self.supportedTools.contains(toolName)
         else {
             throw candidates.isEmpty
                 ? AgentOSRunStreamIngestorError.unsupportedPause
                 : AgentOSRunStreamIngestorError.ambiguousPause
         }
+        if let resolved = start.resolvedToolCallID, resolved != toolCallID {
+            throw AgentOSRunStreamIngestorError.authorityConflict
+        }
+        if start.expectedTarget == nil, let context = start.voiceActionContext {
+            guard context.accessibilityGranted else {
+                throw AgentOSRunStreamIngestorError.macControlPermissionRequired
+            }
+            let proposal = try ExternalActionRequestFactory().proposedVoiceAction(tool)
+            guard context.permits(proposal) else {
+                throw AgentOSRunStreamIngestorError.authorityUnavailable
+            }
+            let originalJSON = try encoder.encode(start)
+            start = TrustedAgentRunStart(
+                launchID: start.launchID,
+                agentID: start.agentID,
+                authenticatedUserID: start.authenticatedUserID,
+                authenticatedSessionID: start.authenticatedSessionID,
+                expectedTarget: proposal.target,
+                expectedOperation: proposal.operation,
+                expiresAt: start.expiresAt,
+                resolvedToolCallID: toolCallID
+            )
+            // Persist the exact binding before publishing any approval. Later
+            // pauses may only replay this same tool call, never add an action.
+            if let persistence {
+                try await persistence.updateTrustedRunAuthority(
+                    StoredTrustedRunAuthority(
+                        id: key, kind: .agent, authorityJSON: try encoder.encode(start),
+                        updatedAt: Date(), expiresAt: start.expiresAt
+                    ),
+                    replacingAuthorityJSON: originalJSON
+                )
+            }
+            agentRuns[key] = start
+        }
+        guard let target = start.expectedTarget, let operation = start.expectedOperation,
+              toolName == operation.semanticToolName
+        else { throw AgentOSRunStreamIngestorError.authorityUnavailable }
         return AgentExternalExecutionPause(
             continuation: continuation,
             toolCallID: toolCallID,
@@ -225,6 +271,12 @@ public actor TrustedRunAuthorityRegistry {
             expectedOperation: operation,
             expiresAt: start.expiresAt
         )
+    }
+
+    public func resolvedAgentAuthority(agentID: String, runID: String) async throws -> TrustedVoiceActionAuthority? {
+        guard let start = try await authority(for: runKey(agentID: agentID, runID: runID)),
+              let target = start.expectedTarget, let operation = start.expectedOperation else { return nil }
+        return try TrustedVoiceActionAuthority(target: target, operation: operation)
     }
 
     private func authority(for key: String) async throws -> TrustedAgentRunStart? {
@@ -295,8 +347,24 @@ public final class AgentOSRunStreamIngestor: AgentOSRunStreamHandling, @unchecke
         try await authorityRegistry.prepareAgentRunStart(start)
     }
 
+    public func resolvedAgentAuthority(agentID: String, runID: String) async throws -> TrustedVoiceActionAuthority? {
+        try await authorityRegistry.resolvedAgentAuthority(agentID: agentID, runID: runID)
+    }
+
     public func finalAgentEvents(agentID: String, runID: String) async -> AsyncStream<ServerSentEvent> {
         await terminalHub.events(for: .agent(agentID: agentID, runID: runID))
+    }
+
+    public func hasPendingAgentReview(
+        agentID: String,
+        runID: String,
+        userID: UserID,
+        sessionID: ProductSessionID
+    ) async throws -> Bool {
+        let coordinator = try boundCoordinator()
+        return await coordinator.hasPendingAgentReview(
+            agentID: agentID, runID: runID, userID: userID, sessionID: sessionID
+        )
     }
 
     public func finalWorkflowEvents(

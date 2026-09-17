@@ -3,6 +3,7 @@ set -e
 
 command -v railway >/dev/null || { echo "Install and log in to the Railway CLI first."; exit 1; }
 [[ -n "${OPENAI_API_KEY:-}" ]] || { echo "Export OPENAI_API_KEY or load .env.production first."; exit 1; }
+[[ -n "${TYPESAFE_API_KEY:-}" ]] || { echo "Export TYPESAFE_API_KEY or load .env.production first."; exit 1; }
 [[ -n "${JWT_VERIFICATION_KEY:-}" ]] || {
     if [[ -n "${JWT_JWKS_FILE:-}" ]]; then
         echo "Railway up.sh cannot upload JWT_JWKS_FILE; export an inline JWT_VERIFICATION_KEY instead."
@@ -32,6 +33,8 @@ railway add -s menso-agentos \
     -v "PORT=8000"
 railway variables --set "DB_PASS=${DB_PASS}" --service menso-agentos >/dev/null 2>&1
 railway variables --set "OPENAI_API_KEY=${OPENAI_API_KEY}" --service menso-agentos >/dev/null 2>&1
+railway variables --set "TYPESAFE_API_KEY=${TYPESAFE_API_KEY}" --service menso-agentos >/dev/null 2>&1
+railway variables --set "TYPESAFE_MODEL=${TYPESAFE_MODEL:-jev-latest}" --service menso-agentos >/dev/null 2>&1
 railway variables --set "MENSO_SAFETY_IDENTIFIER_SALT=${MENSO_SAFETY_IDENTIFIER_SALT}" --service menso-agentos >/dev/null 2>&1
 [[ -n "${JWT_VERIFICATION_KEY:-}" ]] && railway variables --set "JWT_VERIFICATION_KEY=${JWT_VERIFICATION_KEY}" --service menso-agentos >/dev/null 2>&1
 

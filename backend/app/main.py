@@ -11,7 +11,7 @@ from agno.os.config import AuthorizationConfig
 from agno.utils.log import log_info
 from fastapi import FastAPI
 
-from agents.menso import menso_agent
+from app.actions import router as actions_router
 from app.auth_context import router as auth_context_router
 from app.live import router as live_router
 from app.registry import registry
@@ -23,6 +23,7 @@ settings = get_settings()
 base_app = FastAPI(title="Menso AgentOS", version="0.1.0")
 base_app.include_router(auth_context_router)
 base_app.include_router(live_router)
+base_app.include_router(actions_router)
 
 
 @asynccontextmanager
@@ -49,7 +50,9 @@ agent_os = AgentOS(
     name="Menso AgentOS",
     description="Menso voice tasks with approved, locally verified Mac actions.",
     db=get_db(),
-    agents=[menso_agent],
+    # AgentOS remains the verified JWT/state host; voice actions use TypeSafe.
+    # Do not register the legacy generative Menso agent alongside the selector.
+    agents=[],
     registry=registry,
     knowledge=[],
     config=str(Path(__file__).parent / "config.yaml"),

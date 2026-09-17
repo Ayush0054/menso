@@ -37,6 +37,11 @@ let package = Package(
             ],
             path: "Sources/MensoCore"
         ),
+        .testTarget(
+            name: "MensoCoreTests",
+            dependencies: ["MensoCore"],
+            path: "Tests/MensoCoreTests"
+        ),
         .executableTarget(
             name: "MensoApp",
             dependencies: [

@@ -25,6 +25,8 @@ class Settings(BaseModel):
     jwt_algorithm: str = "RS256"
     openai_api_key: str | None = None
     openai_live_model: str = "gpt-live-1"
+    typesafe_api_key: str | None = None
+    typesafe_model: str = "jev-latest"
     safety_identifier_salt: str | None = None
     agentos_url: str = "http://127.0.0.1:8000"
     public_url: str | None = None
@@ -79,6 +81,8 @@ def get_settings() -> Settings:
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "RS256"),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_live_model=os.getenv("OPENAI_LIVE_MODEL", "gpt-live-1"),
+        typesafe_api_key=os.getenv("TYPESAFE_API_KEY"),
+        typesafe_model=os.getenv("TYPESAFE_MODEL", "jev-latest"),
         safety_identifier_salt=os.getenv("MENSO_SAFETY_IDENTIFIER_SALT"),
         agentos_url=os.getenv("AGENTOS_URL", "http://127.0.0.1:8000"),
         public_url=os.getenv("AGENTOS_PUBLIC_URL"),

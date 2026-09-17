@@ -38,11 +38,10 @@ struct MensoRootView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
-                        if let result = model.latestResult {
+                        // Pending approval is rendered only from the native
+                        // coordinator below, never from a model result label.
+                        if let result = model.latestResult, result.status != .requiresExternalAction {
                             resultView(result)
-                        }
-                        ForEach(model.pendingActions) { action in
-                            approvalView(action)
                         }
                         ForEach(model.exhaustedContinuations, id: \.continuationID) { retry in
                             VStack(alignment: .leading, spacing: 8) {
@@ -59,8 +58,23 @@ struct MensoRootView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .onChange(of: model.captionRevision) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
-                .onChange(of: model.pendingActions.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
                 .onChange(of: model.latestResult) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            if !model.pendingActions.isEmpty {
+                Divider()
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(model.pendingActions) { action in
+                            approvalView(action)
+                        }
+                    }
+                    .frame(maxWidth: 620)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity)
+                }
+                .frame(maxHeight: 280)
+                .accessibilityIdentifier("pending-action-reviews")
             }
             if let message = model.message {
                 HStack(alignment: .top, spacing: 12) {
@@ -79,8 +93,6 @@ struct MensoRootView: View {
             switch sheet {
             case .connections:
                 ConnectionsSettingsView(coordinator: model.provisioningCoordinator)
-            case .action:
-                PrepareActionView(model: model)
             }
         }
     }
@@ -113,7 +125,7 @@ struct MensoRootView: View {
                 .font(.system(size: 30, weight: .medium))
                 .tracking(-0.6)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Talk through a task. When it's time to act on your Mac, you stay in control.")
+            Text("Say \"Open Brave\" or focus a text field and ask Menso to type. Review the action before it runs—no setup form.")
                 .font(.system(size: 15))
                 .foregroundStyle(.secondary)
                 .lineSpacing(4)
@@ -144,8 +156,10 @@ struct MensoRootView: View {
                 Spacer()
                 Button("Decline") { model.decide(actionID: action.id, decision: .deny) }
                     .buttonStyle(.bordered)
+                    .accessibilityIdentifier("decline-\(action.id)")
                 Button("Approve") { model.decide(actionID: action.id, decision: .allowOnce) }
                     .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("approve-\(action.id)")
             }
             .disabled(model.resolvingActionIDs.contains(action.id))
         }
@@ -159,7 +173,7 @@ struct MensoRootView: View {
             Image(systemName: result.status == .completed ? "checkmark.circle" : "info.circle")
                 .foregroundStyle(result.status == .completed ? MensoStyle.accent : Color.secondary)
             VStack(alignment: .leading, spacing: 4) {
-                Text(result.status == .completed ? "Done" : result.status == .rejected ? "Couldn't complete" : "Waiting for approval")
+                Text(result.status == .completed ? "Done" : "Couldn't complete")
                     .font(.callout.weight(.semibold))
                 Text(result.spokenSummary).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
             }
@@ -170,22 +184,17 @@ struct MensoRootView: View {
 
     private var footer: some View {
         VStack(spacing: 16) {
-            if let app = model.stagedActionLabel {
-                HStack(spacing: 8) {
-                    Text("Prepared for \(app)").font(.callout)
-                    Text("· next request").font(.callout).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Clear") { model.clearPreparedAction() }.buttonStyle(.plain)
-                }
-            }
             HStack(spacing: 16) {
-                Button {
-                    model.presentedSheet = .action
-                } label: {
-                    Label("Prepare action", systemImage: "plus")
+                if model.accessibilityGranted {
+                    Label("Mac control ready", systemImage: "checkmark.shield")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    Button("Enable Mac control", systemImage: "hand.raised") {
+                        model.requestPermission(.accessibility)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.trustedRuntime == nil)
                 }
-                .buttonStyle(.borderless)
-                .disabled(!model.isLiveVoiceConfigured || model.isWorking)
                 Spacer()
                 if model.isConversationActive {
                     Button("End conversation", systemImage: "stop.fill") { model.endConversation() }
@@ -203,73 +212,12 @@ struct MensoRootView: View {
                         .disabled(!model.isLiveVoiceConfigured || !model.microphoneGranted || model.isChangingVoice)
                 }
             }
-            Text(model.isConversationActive ? "Microphone on · You can speak naturally and interrupt." : "Your microphone stays off until you start.")
-                .font(.caption).foregroundStyle(.tertiary)
+            Text(model.isConversationActive
+                 ? "Microphone on · App names and focused-target details help resolve your requests."
+                 : "Microphone off · Speak to request an action. Approve before it runs.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 32).padding(.vertical, 24)
         .background(MensoStyle.surface)
-    }
-}
-
-private struct PrepareActionView: View {
-    @Bindable var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Prepare a Mac action").font(.title2.weight(.semibold))
-            Text("Choose exactly what Menso may do on your next voice request. You'll approve it before it runs.")
-                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if !model.accessibilityGranted {
-                Button("Allow Accessibility") { model.requestPermission(.accessibility) }
-            }
-            Picker("Action", selection: $model.semanticActionKind) {
-                Text("Open an app").tag(ApplicationSemanticActionKind.openApplication)
-                Text("Focus a window").tag(ApplicationSemanticActionKind.focusWindow)
-                Text("Insert text").tag(ApplicationSemanticActionKind.insertText)
-                Text("Set a control").tag(ApplicationSemanticActionKind.activateControl)
-            }
-            .pickerStyle(.menu)
-            if model.semanticActionKind == .openApplication {
-                HStack {
-                    Text(model.semanticAppName.isEmpty ? "No app selected" : model.semanticAppName)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Choose app…") { model.chooseApplication() }
-                }
-            } else {
-                Text("Menso will hide for three seconds. Focus the window or control you want to use.")
-                    .font(.callout).foregroundStyle(.secondary)
-                Button(model.isCapturingTarget ? "Capturing…" : "Capture target") { model.captureSemanticTarget() }
-                    .disabled(model.isCapturingTarget || !model.accessibilityGranted)
-                if let target = model.capturedSemanticTarget {
-                    Text([model.semanticAppName, target.windowTitle, target.elementLabel].compactMap { $0 }.joined(separator: " · "))
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-            }
-            if model.semanticActionKind == .insertText {
-                TextField("Exact text to insert", text: $model.semanticActionText, axis: .vertical)
-                    .lineLimit(3...6).textFieldStyle(.roundedBorder)
-            }
-            if model.semanticActionKind == .activateControl {
-                TextField("Expected state after the action", text: $model.semanticExpectedState)
-                    .textFieldStyle(.roundedBorder)
-            }
-            if let message = model.message {
-                Text(message).font(.callout).foregroundStyle(.secondary)
-            }
-            HStack {
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Use for next request") { model.stageSemanticActionForVoice() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.semanticBundleIdentifier.isEmpty || model.isCapturingTarget)
-            }
-            Text("Expires after five minutes. Preparing an action does not execute it.")
-                .font(.caption).foregroundStyle(.tertiary)
-        }
-        .padding(28)
-        .frame(width: 480)
-        .tint(MensoStyle.accent)
     }
 }

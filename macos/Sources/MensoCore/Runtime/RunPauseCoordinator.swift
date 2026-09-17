@@ -187,6 +187,27 @@ public actor RunPauseCoordinator {
         return pair.stream
     }
 
+    /// Only a durable, unresolved review for this authenticated run can back
+    /// a voice claim that Approve/Decline is available. Model JSON is not proof.
+    public func hasPendingAgentReview(
+        agentID: String,
+        runID: String,
+        userID: UserID,
+        sessionID: ProductSessionID
+    ) -> Bool {
+        pendingReviews.contains { actionID, entry in
+            guard !resolutionsInFlight.contains(actionID),
+                  pendingResolvedContinuations[actionID] == nil,
+                  entry.requirement.expiresAt > now(),
+                  case let .agent(_, route) = entry.context
+            else { return false }
+            return route.continuation.agentID == agentID
+                && route.continuation.runID == runID
+                && route.continuation.userID == userID
+                && route.continuation.sessionID == sessionID
+        }
+    }
+
     public func restorePendingReviews(limit: Int = 512) async {
         guard !restored else { return }
         restored = true

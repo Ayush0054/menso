@@ -1,3 +1,1 @@
-from db.session import get_db
-
-__all__ = ["get_db"]
+"""Database helpers; import concrete modules without eager settings evaluation."""
