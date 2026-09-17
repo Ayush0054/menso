@@ -1,10 +1,10 @@
 # Menso security invariants
 
-Menso treats every message, transcript line, dialog label, model response, recalled learning, and desktop observation as untrusted input. These invariants are architectural requirements, not prompt guidance.
+Menso treats every message, transcript line, model response and selected desktop target as untrusted input. These invariants are architectural requirements, not prompt guidance.
 
 ## Trust domains
 
-The signed macOS app is the only component allowed to hold Accessibility, Screen Recording, microphone, or local hook credentials. AgentOS and its models receive typed context and action receipts, never raw TCC authority.
+The signed macOS app is the only component allowed to hold Accessibility and microphone permissions, plus local credentials. AgentOS and its models receive typed context and action receipts, never raw TCC authority.
 
 The app launches only the pinned CUA 0.12.6 resources through a direct-child embedded-host responsibility chain. The release manifest binds the archive, executable, session policy, release commit, and MCP protocol; runtime startup rechecks the executable and policy hashes, signed-host attribution, and required permissions. A hosted service, terminal, shell tool, or arbitrary helper must never spawn a raw CUA daemon on Menso's behalf.
 
@@ -29,11 +29,10 @@ Before a continuation POST, the client durably stores the exact Agent `tools` or
 ## Identity and storage
 
 - `user_id` comes from the verified JWT subject; request bodies cannot override it.
-- The durable product conversation/task ID is the AgentOS `session_id`; an ephemeral Realtime connection ID is not.
+- The durable product conversation/task ID is the AgentOS `session_id`; an ephemeral GPT-Live connection ID is not.
 - Local SQLite is authoritative for whether a desktop action executed. Backend rows may reference a local action ID but cannot claim local execution independently.
-- Learnings are user-scoped and advisory. They cannot alter tools, policies, targets, confirmations, idempotency, or permissions.
-- Credentials, tokens, raw screenshots, audio, terminal secrets, and full third-party messages are excluded from learnings.
-- Realtime provider session IDs and function-call IDs never become durable AgentOS identity. Replacement voice sessions receive only bounded, non-executable continuity data; a prior provider call ID is never replayed as a new `function_call_output`.
+- GPT-Live session and delegation IDs never become durable AgentOS identity. Replacement voice sessions receive bounded, passive continuity; a prior delegation is never replayed as a new action.
+- Provider keys stay on the server. Product bearers are sent only to the configured Menso backend. Audio is sent to OpenAI only during a voice session the user starts.
 
 ## Platform limits
 

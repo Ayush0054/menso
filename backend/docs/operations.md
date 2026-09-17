@@ -1,7 +1,11 @@
 # Operations
 
-The image is portable; Railway-specific commands live only under `scripts/railway/`. Postgres must include pgvector and persistent storage. Run one API replica initially because the built-in scheduler is enabled and Workflow pause behavior should be observed before introducing distributed scheduler coordination.
+The portable image uses Postgres task persistence. Railway-specific commands remain under `scripts/railway/`. The application has one Menso Agent; no scheduler, operational workflow, learning curator, or public MCP service is started.
 
-Readiness is available through the `deployment-check` Workflow. Its checks do not execute models or CUA. The `run-evals` Workflow does use models and is disabled on the schedule by default. `agent-improvement` is always registered disabled and is started only as an explicit, verified maintainer run with ownership-bound evidence.
+Production requires asymmetric JWT verification, the correct OS audience, HTTPS, a private database, OpenAI project access to GPT-Live, and a private `MENSO_SAFETY_IDENTIFIER_SALT` of at least 32 characters.
 
-Production startup fails when JWT verification is absent. Also treat a missing OpenAI credential, HTTPS public URL, Realtime HMAC salt, private database connectivity, or duplicated component ID as a deployment failure. The Railway bootstrap helper requires an inline verification key because it cannot upload a host `JWT_JWKS_FILE`; use the file setting only when the file is mounted or baked into the deployed image. Keep `.env.production` out of version control and use the Railway environment sync script only from a trusted terminal.
+Product credentials need `agents:menso:run` and `live:connect`. Reissue older credentials through the trusted issuer. Do not grant admin scopes to fix product authentication failures.
+
+The current dependency lock is retained as a superset while removed feature dependencies are no longer requested by pyproject. Resolve and validate dependencies only after explicit authorization.
+
+No deployment or live API calls were made for the desktop/GPT-Live simplification.

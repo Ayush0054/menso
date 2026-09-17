@@ -154,7 +154,7 @@ public struct TrustedRuntimeConfigurationLoader: Sendable {
             let liveVoiceClientAccessProvider: (any LiveVoiceClientAccessProviding)?
             let liveVoiceNotice: String?
             if verifiedContext.scopes.contains("agent_os:admin")
-                || verifiedContext.scopes.contains("realtime:connect")
+                || verifiedContext.scopes.contains("live:connect")
             {
                 liveVoiceClientAccessProvider = try AuthenticatedLiveVoiceClientAccessProvider(
                     backendBaseURL: baseURL,
@@ -163,18 +163,14 @@ public struct TrustedRuntimeConfigurationLoader: Sendable {
                 liveVoiceNotice = nil
             } else {
                 liveVoiceClientAccessProvider = nil
-                liveVoiceNotice = "Live voice is disabled because the authenticated account lacks realtime:connect scope."
+                liveVoiceNotice = "Live voice is disabled because the authenticated account lacks live:connect scope."
             }
 
             return .agentOS(
                 LoadedTrustedAgentOSConfiguration(
                     configuration: TrustedAgentOSRuntimeConfiguration(
                         client: client,
-                        authenticatedContextProvider: context,
-                        learningManager: AuthenticatedAgentOSLearningClient(
-                            configuration: connection,
-                            tokenProvider: tokenProvider
-                        )
+                        authenticatedContextProvider: context
                     ),
                     authenticatedContextProvider: context,
                     liveVoiceClientAccessProvider: liveVoiceClientAccessProvider

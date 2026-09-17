@@ -9,7 +9,3 @@ from agno.models.openai import OpenAIResponses
 
 def default_model() -> OpenAIResponses:
     return OpenAIResponses(id=os.getenv("MENSO_MODEL_ID", "gpt-5.6-sol"))
-
-
-def executor_model() -> OpenAIResponses:
-    return OpenAIResponses(id=os.getenv("MENSO_EXECUTOR_MODEL_ID", os.getenv("MENSO_MODEL_ID", "gpt-5.6-sol")))

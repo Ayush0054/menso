@@ -28,22 +28,6 @@ public final class LocalDatabase: @unchecked Sendable {
         return try LocalDatabase(url: directory.appending(path: "menso.sqlite"))
     }
 
-    public var usageStore: SQLiteUsageEventStore {
-        SQLiteUsageEventStore(pool: pool)
-    }
-
-    public var cursorStore: SQLiteFileCursorStore {
-        SQLiteFileCursorStore(pool: pool)
-    }
-
-    public var rateLimitStore: SQLiteAgentRateLimitStore {
-        SQLiteAgentRateLimitStore(pool: pool)
-    }
-
-    public var positionStore: SQLiteWindowPositionStore {
-        SQLiteWindowPositionStore(pool: pool)
-    }
-
     public var settingsStore: SQLiteSettingsStore {
         SQLiteSettingsStore(pool: pool)
     }

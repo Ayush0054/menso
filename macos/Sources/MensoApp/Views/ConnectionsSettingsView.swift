@@ -8,11 +8,11 @@ struct ConnectionsSettingsView: View {
     let coordinator: TrustedRuntimeProvisioningCoordinator
 
     @Environment(\.dismiss) private var dismiss
+    @State private var backendURL = "http://127.0.0.1:8000"
     @State private var sessionID = UUID().uuidString.lowercased()
     @State private var bearerToken = ""
     @State private var bearerExpiry = Date.now.addingTimeInterval(3_600)
     @State private var existingSummary: TrustedRuntimeConfigurationSummary?
-    @State private var hasClaudeHookToken = false
     @State private var isLoading = true
     @State private var isSaving = false
     @State private var message: String?
@@ -29,7 +29,6 @@ struct ConnectionsSettingsView: View {
                         value: existingSummary == nil ? "Loading…" : "Verified local JWT"
                     )
                     if let existingSummary {
-                        LabeledContent("Session", value: existingSummary.sessionID.uuidString.lowercased())
                         LabeledContent(
                             "Token expiry",
                             value: existingSummary.accessTokenExpiresAt?.formatted() ?? "Unavailable"
@@ -41,9 +40,7 @@ struct ConnectionsSettingsView: View {
                 }
                 #else
                 Section("AgentOS") {
-                    LabeledContent("AgentOS", value: Self.localAgentOSURL.absoluteString)
-                    TextField("Product session UUID", text: $sessionID)
-                        .fontDesign(.monospaced)
+                    TextField("Server URL", text: $backendURL)
                     SecureField("Bearer access token", text: $bearerToken)
                     if existingSummary != nil {
                         Text("Enter the current or rotated bearer token again before saving; stored secrets are never read back into this form.")
@@ -66,24 +63,6 @@ struct ConnectionsSettingsView: View {
                             value: existingSummary.accessTokenExpiresAt?.formatted() ?? "Unavailable"
                         )
                     }
-                }
-                Section("Claude Code hook (optional)") {
-                    LabeledContent(
-                        "Local hook token",
-                        value: hasClaudeHookToken ? "Provisioned" : "Not provisioned"
-                    )
-                    HStack {
-                        Button(hasClaudeHookToken ? "Copy Token Again" : "Provision and Copy Token") {
-                            provisionClaudeHook()
-                        }
-                        Button("Remove", role: .destructive) {
-                            clearClaudeHook()
-                        }
-                        .disabled(!hasClaudeHookToken)
-                    }
-                    Text("Set the copied value as MENSO_HOOK_TOKEN only in the environment that launches the opt-in Menso Claude Code plugin. Restart Menso after changing it.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 #endif
             }
@@ -119,13 +98,13 @@ struct ConnectionsSettingsView: View {
             #endif
         }
         .padding(20)
-        .frame(width: 540, height: 560)
+        .frame(width: 520, height: 520)
         .task { await loadSummary() }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("Connections")
+            Text("Connection")
                 .font(.title2.bold())
             #if DEBUG
             Text("Local debug authentication is loaded from the ignored backend token and verified by AgentOS.")
@@ -157,68 +136,25 @@ struct ConnectionsSettingsView: View {
                 existingSummary = nil
             case let .configured(summary):
                 existingSummary = summary
+                backendURL = summary.agentOSBaseURL.absoluteString
                 sessionID = summary.sessionID.uuidString.lowercased()
                 if let expiry = summary.accessTokenExpiresAt, expiry > Date.now {
                     bearerExpiry = expiry
                 }
             }
-            #if DEBUG
-            hasClaudeHookToken = false
-            #else
-            hasClaudeHookToken = try await coordinator.claudeHookToken() != nil
-            #endif
         } catch {
             message = "Stored connection metadata could not be read. You can clear it and configure again."
         }
     }
 
-    private func provisionClaudeHook() {
-        isSaving = true
-        Task {
-            do {
-                let token = try await coordinator.provisionClaudeHookToken()
-                await MainActor.run {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(token, forType: .string)
-                    hasClaudeHookToken = true
-                    isSaving = false
-                    message = "The Claude hook token was copied. Restart Menso after installing or updating the plugin environment."
-                }
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    message = "The Claude hook token could not be provisioned."
-                }
-            }
-        }
-    }
-
-    private func clearClaudeHook() {
-        isSaving = true
-        Task {
-            do {
-                try await coordinator.clearClaudeHookToken()
-                await MainActor.run {
-                    hasClaudeHookToken = false
-                    isSaving = false
-                    message = "The Claude hook token was removed. Restart Menso to stop the listener."
-                }
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    message = "The Claude hook token could not be removed."
-                }
-            }
-        }
-    }
-
     private func saveConnections() {
-        guard let session = UUID(uuidString: sessionID.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard let serverURL = URL(string: backendURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let session = UUID(uuidString: sessionID.trimmingCharacters(in: .whitespacesAndNewlines))
         else { return }
         isSaving = true
         message = "Verifying the authenticated AgentOS identity…"
         let request = TrustedRuntimeProvisioningRequest(
-            agentOSBaseURL: Self.localAgentOSURL,
+            agentOSBaseURL: serverURL,
             sessionID: session,
             accessToken: bearerToken,
             accessTokenExpiresAt: bearerExpiry

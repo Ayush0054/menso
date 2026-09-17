@@ -1,4 +1,4 @@
-"""Narrow OpenAI Realtime delegation contract."""
+"""Typed results from the Menso task agent to GPT-Live."""
 
 from __future__ import annotations
 

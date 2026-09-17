@@ -7,11 +7,11 @@ public enum PersistedVoiceDelegationState: String, Codable, Hashable, Sendable {
     /// may have succeeded even when its response was not observed.
     case inFlight = "in_flight"
     /// The result is durably available but has not been accepted by the
-    /// original Realtime function call.
+    /// original GPT-Live delegation.
     case awaitingOriginalCall = "awaiting_original_call"
-    /// The original Realtime data channel accepted the terminal function output.
+    /// The original GPT-Live data channel accepted the delegation result.
     case deliveredToOriginalCall = "delivered_to_original_call"
-    /// The replacement Realtime adapter's local data channel accepted this
+    /// The replacement GPT-Live adapter's local data channel accepted this
     /// record as continuity data. This is deliberately not a function-call output.
     case representedInReplacement = "represented_in_replacement"
 }

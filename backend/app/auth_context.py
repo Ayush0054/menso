@@ -20,7 +20,7 @@ def require_verified_jwt_context(request: Request) -> tuple[str, list[str]]:
 
     AgentOS also authenticates service-account PATs and its internal scheduler
     token. Those credentials intentionally have no decoded ``claims`` object
-    and must not mint a user Realtime token or become the Mac user's identity.
+    and must not create a user GPT-Live session or become the Mac user's identity.
     """
 
     authenticated = bool(getattr(request.state, "authenticated", False))

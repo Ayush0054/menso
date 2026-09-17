@@ -23,17 +23,11 @@ class Settings(BaseModel):
     jwt_verification_key: str | None = None
     jwt_jwks_file: str | None = None
     jwt_algorithm: str = "RS256"
-    admin_user_ids: frozenset[str] = frozenset()
     openai_api_key: str | None = None
-    openai_realtime_model: str = "gpt-realtime-2.1"
-    openai_realtime_voice: str = "marin"
-    openai_realtime_reasoning_effort: str = "low"
+    openai_live_model: str = "gpt-live-1"
     safety_identifier_salt: str | None = None
     agentos_url: str = "http://127.0.0.1:8000"
     public_url: str | None = None
-    improvement_schedule_cron: str = "0 4 * * 1"
-    eval_schedule_enabled: bool = False
-    eval_schedule_cron: str = "0 5 * * 1"
 
     @field_validator("database_url", mode="before")
     @classmethod
@@ -56,17 +50,6 @@ class Settings(BaseModel):
     @property
     def auth_enabled(self) -> bool:
         return self.runtime_env != "dev"
-
-
-def _split_csv(value: str | None) -> frozenset[str]:
-    return frozenset(item.strip() for item in (value or "").split(",") if item.strip())
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _database_url(runtime_env: str) -> str:
@@ -94,17 +77,11 @@ def get_settings() -> Settings:
         jwt_verification_key=os.getenv("JWT_VERIFICATION_KEY"),
         jwt_jwks_file=os.getenv("JWT_JWKS_FILE"),
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "RS256"),
-        admin_user_ids=_split_csv(os.getenv("MENSO_ADMIN_USER_IDS")),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
-        openai_realtime_model=os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1"),
-        openai_realtime_voice=os.getenv("OPENAI_REALTIME_VOICE", "marin"),
-        openai_realtime_reasoning_effort=os.getenv("OPENAI_REALTIME_REASONING_EFFORT", "low"),
+        openai_live_model=os.getenv("OPENAI_LIVE_MODEL", "gpt-live-1"),
         safety_identifier_salt=os.getenv("MENSO_SAFETY_IDENTIFIER_SALT"),
         agentos_url=os.getenv("AGENTOS_URL", "http://127.0.0.1:8000"),
         public_url=os.getenv("AGENTOS_PUBLIC_URL"),
-        improvement_schedule_cron=os.getenv("IMPROVEMENT_SCHEDULE_CRON", "0 4 * * 1"),
-        eval_schedule_enabled=_env_bool("EVAL_SCHEDULE_ENABLED", False),
-        eval_schedule_cron=os.getenv("EVAL_SCHEDULE_CRON", "0 5 * * 1"),
     )
 
 

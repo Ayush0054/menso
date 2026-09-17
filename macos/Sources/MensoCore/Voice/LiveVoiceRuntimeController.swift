@@ -20,7 +20,8 @@ public actor ConfiguredLiveVoiceRuntimeController: LiveVoiceRuntimeControlling {
     }
 
     public func toggle() async throws {
-        if desiredActive {
+        let current = await coordinator.currentState()
+        if desiredActive && current != .failed && current != .disconnected {
             desiredActive = false
             await coordinator.stop()
             return
@@ -45,5 +46,9 @@ public actor ConfiguredLiveVoiceRuntimeController: LiveVoiceRuntimeControlling {
 
     public func state() async -> LiveVoiceSessionState {
         await coordinator.currentState()
+    }
+
+    public func updates() async -> AsyncStream<LiveVoiceUpdate> {
+        await coordinator.updates()
     }
 }

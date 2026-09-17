@@ -25,15 +25,11 @@
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
-    <true/>
+    <false/>
     <key>NSAppleEventsUsageDescription</key>
     <string>Menso uses Automation only when you ask it to operate an app whose scripting interface is required.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Menso uses the microphone only while you dictate or start a voice conversation.</string>
-    <key>NSScreenCaptureUsageDescription</key>
-    <string>Menso uses Screen Recording only when you enable visual computer use, so it can inspect and verify the window you asked it to operate.</string>
-    <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Menso uses on-device speech recognition only when that dictation engine is selected.</string>
+    <string>Menso uses the microphone only during a voice conversation you start.</string>
     <key>SUFeedURL</key>
     <string>__MENSO_SPARKLE_FEED_URL__</string>
     <key>SUPublicEDKey</key>

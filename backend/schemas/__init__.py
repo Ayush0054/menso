@@ -5,7 +5,6 @@ from schemas.actions import (
     ApplicationActionTarget,
     ExternalExecutionResult,
 )
-from schemas.learning import LearningCandidate, MensoUserProfile
 from schemas.voice import DelegateToMensoRequest, DelegateToMensoResult
 
 __all__ = [
@@ -14,6 +13,4 @@ __all__ = [
     "DelegateToMensoRequest",
     "DelegateToMensoResult",
     "ExternalExecutionResult",
-    "LearningCandidate",
-    "MensoUserProfile",
 ]

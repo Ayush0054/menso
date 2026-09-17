@@ -1,5 +1,4 @@
 {
-  "accessibility": "Menso uses Accessibility to read the active app's controls and, only after your approval, operate supported app controls.",
-  "microphone": "Menso uses the microphone only while you dictate or start a voice conversation.",
-  "screenRecording": "Menso uses Screen Recording only when you enable visual computer use, so it can inspect and verify the window you asked it to operate."
+  "accessibility": "Menso uses Accessibility to identify the app control you select and carry out the exact action you approve.",
+  "microphone": "Menso uses the microphone during a voice conversation you start. Audio is sent to OpenAI to provide live voice responses."
 }

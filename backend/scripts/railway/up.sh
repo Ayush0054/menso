@@ -35,7 +35,7 @@ railway variables --set "OPENAI_API_KEY=${OPENAI_API_KEY}" --service menso-agent
 railway variables --set "MENSO_SAFETY_IDENTIFIER_SALT=${MENSO_SAFETY_IDENTIFIER_SALT}" --service menso-agentos >/dev/null 2>&1
 [[ -n "${JWT_VERIFICATION_KEY:-}" ]] && railway variables --set "JWT_VERIFICATION_KEY=${JWT_VERIFICATION_KEY}" --service menso-agentos >/dev/null 2>&1
 
-# The scheduler must know the public origin before the first process starts.
+# The service metadata must know the public origin before the first process starts.
 # Prefer an explicitly pinned custom origin; otherwise use Railway's domain.
 DOMAIN_OUTPUT="$(railway domain --service menso-agentos 2>&1 || true)"
 echo "$DOMAIN_OUTPUT"

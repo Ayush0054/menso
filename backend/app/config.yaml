@@ -1,21 +1,3 @@
 manifest:
   menso:
-    description: "Private assistant for durable reasoning and policy-gated, client-executed desktop actions."
-    quick_prompts:
-      - "Summarize my current task and the next safe step."
-      - "Insert a draft into the selected application field, but do not submit it."
-
-  agent-improvement:
-    description: "Admin-only evidence curation and reviewed knowledge/source-change proposal."
-    quick_prompts:
-      - "Review explicit evidence for a Menso improvement proposal."
-
-  deployment-check:
-    description: "Run deterministic deployment readiness checks."
-    quick_prompts:
-      - "Run the deployment check."
-
-  run-evals:
-    description: "Run the explicit Menso eval suite; never scheduled by default."
-    quick_prompts:
-      - "Run the smoke evals."
+    description: "Small Mac tasks, with local approval and verified results."

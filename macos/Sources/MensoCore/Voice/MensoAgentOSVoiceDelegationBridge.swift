@@ -37,19 +37,7 @@ public struct MensoAgentOSVoiceDelegationBridge: MensoVoiceDelegating {
               agentID == Self.agentID
         else { throw LiveVoiceError.invalidDelegation }
 
-        let authority: TrustedVoiceActionAuthority?
-        switch delegation.request.operationHint {
-        case .desktopAction:
-            guard let local = delegation.actionAuthority else {
-                return VoiceDelegationResult(
-                    status: .rejected,
-                    spokenSummary: "Select one exact app target and action in Menso first."
-                )
-            }
-            authority = local
-        case .openEnded, .none:
-            authority = nil
-        }
+        let authority = delegation.actionAuthority
 
         let start = TrustedAgentRunStart(
             launchID: UUID().uuidString.lowercased(),
@@ -86,7 +74,7 @@ public struct MensoAgentOSVoiceDelegationBridge: MensoVoiceDelegating {
         )
 
         if let result = try await observer.completedResult() {
-            return try await verifiedResult(result)
+            return try await verifiedResult(result, authority: authority)
         }
         guard let runID = await observer.runID() else {
             throw LiveVoiceError.invalidDelegation
@@ -107,7 +95,7 @@ public struct MensoAgentOSVoiceDelegationBridge: MensoVoiceDelegating {
             expectedUserID: verified.userID,
             expectedSessionID: verified.sessionID
         ) else { throw LiveVoiceError.invalidDelegation }
-        return try await verifiedResult(result)
+        return try await verifiedResult(result, authority: authority)
     }
 
     private func firstTerminalEvent(agentID: String, runID: String) async -> ServerSentEvent? {
@@ -128,14 +116,25 @@ public struct MensoAgentOSVoiceDelegationBridge: MensoVoiceDelegating {
     }
 
     private func verifiedResult(
-        _ result: VoiceDelegationResult
+        _ result: VoiceDelegationResult,
+        authority: TrustedVoiceActionAuthority?
     ) async throws -> VoiceDelegationResult {
+        if authority != nil, result.status == .completed, result.actionReceipts.count != 1 {
+            throw LiveVoiceError.invalidDelegation
+        }
         for receipt in result.actionReceipts {
             guard let stored = try await actionResultStore.execution(
                 for: ActionID(rawValue: receipt.actionID)
             ),
             try ExternalExecutionWireResult(actionResult: stored.result) == receipt
             else { throw LiveVoiceError.invalidDelegation }
+            guard let authority,
+                  stored.result.target == authority.target,
+                  stored.result.contentHash == authority.operation.contentHash
+            else { throw LiveVoiceError.invalidDelegation }
+            if result.status == .completed, !stored.result.verified {
+                throw LiveVoiceError.invalidDelegation
+            }
         }
         return result
     }
@@ -151,13 +150,18 @@ public struct MensoAgentOSVoiceDelegationBridge: MensoVoiceDelegating {
         }
         if let authority {
             guard case let .focusedApplication(target) = authority.target else { return task }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            guard let targetData = try? encoder.encode(target),
+                  let operationData = try? encoder.encode(authority.operation),
+                  let targetJSON = String(data: targetData, encoding: .utf8),
+                  let operationJSON = String(data: operationData, encoding: .utf8)
+            else { return task }
             sections.append(
                 "Trusted local action binding: tool=\(authority.operation.semanticToolName), "
-                    + "bundle_id=\(target.bundleIdentifier), "
-                    + "window_title=\(target.windowTitle ?? "none"), "
-                    + "element_role=\(target.elementRole ?? "none"), "
-                    + "element_label=\(target.elementLabel ?? "none"). "
-                    + "Use exactly this binding; ask for clarification rather than changing it."
+                    + "target=\(targetJSON), operation=\(operationJSON). "
+                    + "Use exactly this one operation, including its text or expected state. "
+                    + "The user must approve it in Menso before execution."
             )
         }
         return sections.joined(separator: "\n\n")

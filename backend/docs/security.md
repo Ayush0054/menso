@@ -1,13 +1,13 @@
-# Security and authority notes
+# Security and authority
 
-Menso splits orchestration from execution. AgentOS authenticates, scopes, persists, and resumes runs. The signed Mac app observes native state, applies local allowlists and approval policy, performs CUA, verifies outcomes, and keeps TCC privileges. An external-execution tool requirement is a request—not evidence that an action occurred.
+AgentOS authenticates, scopes, persists, and resumes tasks. The signed Mac owns local target recognition, policy, approval, execution, and verification. An external-execution requirement is a request, not evidence that an action occurred.
 
-Production authorization uses one expected audience (`OS_ID`), RS256 by default, and per-user run/session isolation. Normal product JWTs should use per-resource scopes. `/menso/auth/context` and the Realtime route require decoded JWT claims and reject PAT/internal credentials; the Realtime route additionally requires `realtime:connect`, hashes the verified subject with a private high-entropy salt for OpenAI's safety identifier, and returns only the provider's ephemeral `value`, `expires_at`, and constrained `session` object.
+Production authorization uses an expected `OS_ID` audience, asymmetric verification, and user isolation. `/menso/auth/context` and `/menso/live/session` require decoded, verified JWT claims and reject internal/PAT credentials. Live creation requires `live:connect`; the verified subject is HMACed with a private salt for OpenAI's safety identifier.
 
-Realtime delegation has only two routing hints: `open_ended` and `desktop_action`. Both map to the public Menso Agent. A desktop action is admitted only when the Mac already holds an exact native target and exact semantic operation. Unknown or ambiguous operations must be clarified; Realtime text cannot invent a target or register a new action.
+The backend forwards a constrained server-owned `gpt-live-1` client-delegation configuration and the client's bounded SDP offer to OpenAI. Only the session ID and SDP answer return to the Mac. The provider key is never returned.
 
-All desktop content and model output are untrusted. The public Agent sees only semantic core actions and never sees raw CUA MCP. The Mac captures exact application/window/element authority and the complete expected operation before starting the run, then rejects different model arguments before execution.
+Transcripts and model output are untrusted. The Mac may bind one locally prepared semantic operation to a delegation. It verifies all model arguments and asks the user before execution. Results are checked against local receipts before the voice model receives them.
 
-A verified bearer JWT establishes user identity, not device proof-of-possession by itself. The production issuer/pairing service must mint product tokens only after validating the signed Mac's device registration, or add a DPoP/mTLS-equivalent request proof. This repository does not yet implement that external registration/attestation service, so operators must not describe possession of an ordinary bearer token as proof that a paired device made the request.
+An ordinary bearer JWT establishes account identity, not signed-device proof. Device attestation/registration remains external deployment work. Do not describe a bearer token as proof of a paired device.
 
-Never log bearer tokens, provider responses containing secret values, raw Realtime subjects, raw CUA evidence, or unredacted third-party content. Prefer opaque evidence references and normalized action status/error codes. Rotate JWT keys, OpenAI credentials, and the safety salt through the deployment secret manager; rotating the safety salt intentionally changes upstream pseudonymous identifiers.
+Never log bearer tokens, provider keys, raw CUA evidence, SDP bodies, or unredacted third-party content. Preserve exact continuation identifiers and payloads. See the repository security document for crash/retry limitations.

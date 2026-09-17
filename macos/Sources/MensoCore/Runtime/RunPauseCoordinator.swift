@@ -134,14 +134,6 @@ public actor RunPauseCoordinator {
     ] = [:]
     private var noticeContinuations: [UUID: AsyncStream<RuntimeNotice>.Continuation] = [:]
 
-    private var claudeReviewContinuations: [
-        HumanReviewID: CheckedContinuation<ClaudePermissionReviewResult, Never>
-    ] = [:]
-    private var claudeReviewActions: [HumanReviewID: ActionID] = [:]
-    private var claudeReviewSummaries: [ActionID: PendingActionSummary] = [:]
-    private var claudeReviewSuggestionIndices: [HumanReviewID: Int] = [:]
-    private var cancelledClaudeReviews: Set<HumanReviewID> = []
-
     public init(
         policyEngine: PolicyEngine,
         actionExecutor: ActionExecutor,
@@ -286,44 +278,6 @@ public actor RunPauseCoordinator {
         publishPendingActions()
     }
 
-    public func reviewClaudePermission(
-        _ review: ClaudePermissionReviewRequest
-    ) async -> ClaudePermissionReviewResult {
-        guard review.expiresAt > now(),
-              !review.input.toolName.isEmpty,
-              !review.input.sessionID.isEmpty,
-              claudeReviewContinuations[review.id] == nil,
-              pendingReviews[review.actionID] == nil
-        else { return .deny }
-
-        claudeReviewSummaries[review.actionID] = PendingActionSummary(
-            id: review.actionID.rawValue,
-            title: "Claude wants to use \(review.input.toolName)",
-            detail: "Review this exact Claude Code permission request.",
-            sourceLabel: "Claude Code",
-            targetLabel: review.input.workingDirectory,
-            expiresAt: review.expiresAt,
-            canCreateAlwaysRule: review.input.permissionSuggestions.count == 1
-        )
-        claudeReviewActions[review.id] = review.actionID
-        if review.input.permissionSuggestions.count == 1 {
-            claudeReviewSuggestionIndices[review.id] = 0
-        }
-        publishPendingActions()
-
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                if cancelledClaudeReviews.remove(review.id) != nil {
-                    continuation.resume(returning: .deny)
-                } else {
-                    claudeReviewContinuations[review.id] = continuation
-                }
-            }
-        } onCancel: {
-            Task { await self.cancelClaudeReview(id: review.id) }
-        }
-    }
-
     public func resolve(
         actionID: ActionID,
         resolution: HumanReviewResolution
@@ -340,26 +294,6 @@ public actor RunPauseCoordinator {
             pendingReviews.removeValue(forKey: actionID)
             try? await pendingReviewStore?.deletePendingRunReview(actionID: actionID)
             publishPendingActions()
-            return
-        }
-
-        if let claudeID = claudeReviewActions.first(where: { $0.value == actionID })?.key,
-           let continuation = claudeReviewContinuations.removeValue(forKey: claudeID)
-        {
-            claudeReviewActions.removeValue(forKey: claudeID)
-            claudeReviewSummaries.removeValue(forKey: actionID)
-            let suggestion = claudeReviewSuggestionIndices.removeValue(forKey: claudeID)
-            publishPendingActions()
-            switch resolution {
-            case .approveOnce: continuation.resume(returning: .allowOnce)
-            case .alwaysAllow:
-                if let suggestion {
-                    continuation.resume(returning: .allowSuggestion(suggestion))
-                } else {
-                    continuation.resume(returning: .deny)
-                }
-            case .deny: continuation.resume(returning: .deny)
-            }
             return
         }
 
@@ -474,19 +408,8 @@ public actor RunPauseCoordinator {
         } catch { return false }
     }
 
-    private func cancelClaudeReview(id: HumanReviewID) {
-        cancelledClaudeReviews.insert(id)
-        guard let continuation = claudeReviewContinuations.removeValue(forKey: id) else { return }
-        if let actionID = claudeReviewActions.removeValue(forKey: id) {
-            claudeReviewSummaries.removeValue(forKey: actionID)
-        }
-        claudeReviewSuggestionIndices.removeValue(forKey: id)
-        continuation.resume(returning: .deny)
-        publishPendingActions()
-    }
-
     private func allPendingSummaries() -> [PendingActionSummary] {
-        (pendingReviews.values.map(\.summary) + claudeReviewSummaries.values)
+        pendingReviews.values.map(\.summary)
             .sorted { ($0.expiresAt ?? .distantFuture) < ($1.expiresAt ?? .distantFuture) }
     }
 

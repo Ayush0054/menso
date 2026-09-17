@@ -13,26 +13,21 @@ from fastapi import FastAPI
 
 from agents.menso import menso_agent
 from app.auth_context import router as auth_context_router
-from app.realtime import router as realtime_router
+from app.live import router as live_router
 from app.registry import registry
-from app.schedules import register_schedules
 from app.settings import get_settings, resolve_jwks_file
 from db.session import get_db
-from workflows.agent_improvement import agent_improvement_workflow
-from workflows.deployment_check import deployment_check_workflow
-from workflows.run_evals import run_evals_workflow
 
 settings = get_settings()
 
 base_app = FastAPI(title="Menso AgentOS", version="0.1.0")
 base_app.include_router(auth_context_router)
-base_app.include_router(realtime_router)
+base_app.include_router(live_router)
 
 
 @asynccontextmanager
 async def lifespan(_app):  # type: ignore[no-untyped-def]
     log_info("Menso AgentOS startup")
-    register_schedules()
     try:
         yield
     finally:
@@ -52,25 +47,17 @@ authorization_config = AuthorizationConfig(
 agent_os = AgentOS(
     id=settings.os_id,
     name="Menso AgentOS",
-    description="Durable Menso agents and reviewed workflows; native UI execution remains on macOS.",
+    description="Menso voice tasks with approved, locally verified Mac actions.",
     db=get_db(),
     agents=[menso_agent],
-    workflows=[
-        agent_improvement_workflow,
-        deployment_check_workflow,
-        run_evals_workflow,
-    ],
-    knowledge=[],
     registry=registry,
+    knowledge=[],
     config=str(Path(__file__).parent / "config.yaml"),
     base_app=base_app,
     on_route_conflict="error",
     authorization=settings.auth_enabled,
     authorization_config=authorization_config,
     tracing=True,
-    scheduler=True,
-    scheduler_base_url=settings.public_url or settings.agentos_url,
-    mcp_server=True,
     lifespan=lifespan,
 )
 

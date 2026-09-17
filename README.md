@@ -1,35 +1,23 @@
 # Menso
 
-Menso is a native macOS companion that monitors local apps and AI-agent sessions, surfaces approvals, supports dictation and live voice, and delegates narrow desktop actions through a signed, policy-controlled client.
+Menso is a native Mac desktop app for one loop: talk, prepare a small Mac action, approve it, and see the result.
 
-The implementation follows [ARCHITECTURE.md](ARCHITECTURE.md). It is split into two trust domains:
+The app has one resizable window with live captions, a start/end voice control, action approvals, and results. A small action sheet supports opening an app, focusing a window, inserting exact text, and setting a control. Preparing an action does not approve it: each execution still requires a local decision.
 
-- `macos/` owns observation, approvals, policy, credentials, audio, audit evidence, and all desktop execution.
-- `backend/` owns AgentOS APIs, reusable Agno Agents and Workflows, typed external-execution requirements, learning state, and Postgres persistence.
+Voice uses OpenAI `gpt-live-1` with client delegation. A single AgentOS agent handles reasoning and requests typed actions. The signed Mac owns microphone access, target selection, policy, approvals, execution, and verification. Provider keys stay on the backend.
 
-The backend cannot control the Mac. A CUA-backed Agno tool pauses its run; the authenticated Mac validates the exact requirement, applies local policy, executes only through the pinned embedded CUA host, requires observable outcome evidence, and continues the same run with the endpoint-specific payload. When an application-specific verifier is unavailable, the action fails closed.
+## Repository
 
-## Repository map
+- `macos/`: AppKit/SwiftUI desktop app and trusted local execution.
+- `backend/`: authenticated AgentOS, GPT-Live session negotiation, and Postgres task state.
+- [Architecture](ARCHITECTURE.md): trust boundaries and the voice/action flow.
+- [Implementation status](docs/IMPLEMENTATION_STATUS.md): source changes and outstanding runtime validation.
+- [Security](docs/SECURITY.md): authority and continuation invariants.
 
-- `backend/` — Python 3.12 AgentOS service and Railway-compatible deploy layer.
-- `macos/` — macOS 14+ Swift package containing the AppKit/SwiftUI shell and trusted client core.
-- `integrations/claude-code/` — opt-in Claude Code hook plugin; it never edits global Claude settings.
-- `docs/SECURITY.md` — non-negotiable trust, identity, and action invariants.
-- `docs/IMPLEMENTATION_STATUS.md` — implemented milestone map and remaining platform adapters.
+The floating widget, app/process monitoring, coding-agent dashboards, Claude hooks, dictation, learning management, and scheduled workflows have been removed. Historical SQLite tables and action wire variants are retained for data compatibility; nothing collects new monitoring data.
 
-## Local setup
+## Configuration
 
-Read the component READMEs before configuring credentials:
+See [backend setup](backend/README.md) and [Mac setup](macos/README.md). The backend needs an OpenAI project with GPT-Live access, Postgres, verified JWT authentication, and a private safety-identifier salt. Product tokens need `live:connect` and `agents:menso:run`; old `realtime:connect` tokens must be reissued by the trusted issuer.
 
-1. Start Postgres with pgvector and configure `backend/example.env`.
-2. Run the AgentOS service using the backend's documented environment.
-3. Configure the macOS client with the authenticated AgentOS URL.
-4. Opt into CUA, Claude hooks, microphone, or Screen Recording only when their feature is enabled.
-
-The checked-in source includes the trusted boundaries and release machinery. Generic CUA actions are implemented through a pinned private driver adapter that proves the exact native target and resulting state before returning success. See [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) for the precise split between source implementation and external production inputs.
-
-Provider, JWT, and Realtime secrets must not be committed. Production provider keys remain on the backend. The local hook token remains in the Mac Keychain.
-
-## Validation status
-
-Validation is intentionally not run during architecture implementation. Repository policy requires explicit user approval before any build, test, lint, formatting, import, or live smoke command.
+This change has not been built, tested, formatted, or exercised live. The repository requires explicit authorization before those checks. No credentials or databases were changed.

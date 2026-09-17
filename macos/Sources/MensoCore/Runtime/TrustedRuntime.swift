@@ -2,19 +2,13 @@ import Foundation
 
 public struct TrustedRuntimeCapabilities: Sendable, Hashable {
     public let backendContinuationConfigured: Bool
-    public let claudeHooksConfigured: Bool
-    public let dictationConfigured: Bool
     public let liveVoiceConfigured: Bool
 
     public init(
         backendContinuationConfigured: Bool,
-        claudeHooksConfigured: Bool,
-        dictationConfigured: Bool,
         liveVoiceConfigured: Bool
     ) {
         self.backendContinuationConfigured = backendContinuationConfigured
-        self.claudeHooksConfigured = claudeHooksConfigured
-        self.dictationConfigured = dictationConfigured
         self.liveVoiceConfigured = liveVoiceConfigured
     }
 }
@@ -22,27 +16,24 @@ public struct TrustedRuntimeCapabilities: Sendable, Hashable {
 public protocol LiveVoiceRuntimeControlling: Sendable {
     func toggle() async throws
     func stop() async
+    func updates() async -> AsyncStream<LiveVoiceUpdate>
 }
 
 public struct TrustedAgentOSRuntimeConfiguration: Sendable {
     public let client: any AgentOSRunClient
     public let authenticatedContextProvider: any AuthenticatedProductContextProviding
-    public let learningManager: any AgentOSLearningManaging
 
     public init(
         client: any AgentOSRunClient,
-        authenticatedContextProvider: any AuthenticatedProductContextProviding,
-        learningManager: any AgentOSLearningManaging
+        authenticatedContextProvider: any AuthenticatedProductContextProviding
     ) {
         self.client = client
         self.authenticatedContextProvider = authenticatedContextProvider
-        self.learningManager = learningManager
     }
 }
 
 public struct TrustedRuntimeFeatureContext: Sendable {
     public let database: LocalDatabase
-    public let signalBus: SignalBus
     public let policyEngine: PolicyEngine
     public let actionExecutor: ActionExecutor
     public let pauseCoordinator: RunPauseCoordinator
@@ -53,19 +44,13 @@ public struct TrustedRuntimeFeatureContext: Sendable {
 }
 
 public struct TrustedRuntimeFeatures: Sendable {
-    public let claudeHookReceiver: (any ClaudeHookReceiving)?
-    public let dictationRuntime: (any DictationRuntimeControlling)?
     public let liveVoiceRuntime: (any LiveVoiceRuntimeControlling)?
     public let voiceActionAuthorityStore: UserStagedVoiceActionAuthorityStore?
 
     public init(
-        claudeHookReceiver: (any ClaudeHookReceiving)? = nil,
-        dictationRuntime: (any DictationRuntimeControlling)? = nil,
         liveVoiceRuntime: (any LiveVoiceRuntimeControlling)? = nil,
         voiceActionAuthorityStore: UserStagedVoiceActionAuthorityStore? = nil
     ) {
-        self.claudeHookReceiver = claudeHookReceiver
-        self.dictationRuntime = dictationRuntime
         self.liveVoiceRuntime = liveVoiceRuntime
         self.voiceActionAuthorityStore = voiceActionAuthorityStore
     }
@@ -76,7 +61,6 @@ public struct TrustedRuntimeFeatures: Sendable {
 /// remain local to this graph.
 public final class TrustedRuntime: @unchecked Sendable {
     public let database: LocalDatabase
-    public let signalBus: SignalBus
     public let policyEngine: PolicyEngine
     public let actionExecutor: ActionExecutor
     public let pauseCoordinator: RunPauseCoordinator
@@ -85,16 +69,13 @@ public final class TrustedRuntime: @unchecked Sendable {
     public let capabilities: TrustedRuntimeCapabilities
     public let runStreamHandler: AgentOSRunStreamIngestor?
     public let runAuthorityRegistry: TrustedRunAuthorityRegistry?
-    public let dictationRuntime: (any DictationRuntimeControlling)?
     public let liveVoiceRuntime: (any LiveVoiceRuntimeControlling)?
-    public let learningManager: (any AgentOSLearningManaging)?
     public let voiceActionAuthorityStore: UserStagedVoiceActionAuthorityStore?
 
     private let cuaDriverHost: any CuaDriverHost
     private let durableContinuationDispatcher: DurableAgentOSRunContinuationDispatcher?
     private let agentOSRunClient: (any AgentOSRunClient)?
     private let authenticatedContextProvider: (any AuthenticatedProductContextProviding)?
-    private let claudeHookReceiver: (any ClaudeHookReceiving)?
 
     public init(
         database: LocalDatabase,
@@ -103,13 +84,11 @@ public final class TrustedRuntime: @unchecked Sendable {
         permissionAdapter: MacOSPermissionAdapter = MacOSPermissionAdapter(),
         featureBuilder: @Sendable (
             _ database: LocalDatabase,
-            _ signalBus: SignalBus,
             _ policyEngine: PolicyEngine,
             _ actionExecutor: ActionExecutor,
             _ pauseCoordinator: RunPauseCoordinator
-        ) -> TrustedRuntimeFeatures = { _, _, _, _, _ in TrustedRuntimeFeatures() }
+        ) -> TrustedRuntimeFeatures = { _, _, _, _ in TrustedRuntimeFeatures() }
     ) {
-        let signalBus = SignalBus()
         let actionStore = database.actionStore
         let policyEngine = PolicyEngine(configuration: policyConfiguration, auditSink: actionStore)
         let actionExecutor = ActionExecutor(
@@ -126,14 +105,12 @@ public final class TrustedRuntime: @unchecked Sendable {
         )
         let features = featureBuilder(
             database,
-            signalBus,
             policyEngine,
             actionExecutor,
             pauseCoordinator
         )
 
         self.database = database
-        self.signalBus = signalBus
         self.policyEngine = policyEngine
         self.actionExecutor = actionExecutor
         self.pauseCoordinator = pauseCoordinator
@@ -144,21 +121,16 @@ public final class TrustedRuntime: @unchecked Sendable {
         )
         self.capabilities = TrustedRuntimeCapabilities(
             backendContinuationConfigured: false,
-            claudeHooksConfigured: features.claudeHookReceiver != nil,
-            dictationConfigured: features.dictationRuntime != nil,
             liveVoiceConfigured: features.liveVoiceRuntime != nil
         )
         self.runStreamHandler = nil
         self.runAuthorityRegistry = nil
-        self.dictationRuntime = features.dictationRuntime
         self.liveVoiceRuntime = features.liveVoiceRuntime
-        self.learningManager = nil
         self.voiceActionAuthorityStore = features.voiceActionAuthorityStore
         self.cuaDriverHost = cuaDriverHost
         self.durableContinuationDispatcher = nil
         self.agentOSRunClient = nil
         self.authenticatedContextProvider = nil
-        self.claudeHookReceiver = features.claudeHookReceiver
     }
 
     public init(
@@ -169,7 +141,6 @@ public final class TrustedRuntime: @unchecked Sendable {
         permissionAdapter: MacOSPermissionAdapter = MacOSPermissionAdapter(),
         featureBuilder: @Sendable (TrustedRuntimeFeatureContext) -> TrustedRuntimeFeatures
     ) throws {
-        let signalBus = SignalBus()
         let actionStore = database.actionStore
         let policyEngine = PolicyEngine(configuration: policyConfiguration, auditSink: actionStore)
         let actionExecutor = ActionExecutor(
@@ -196,7 +167,6 @@ public final class TrustedRuntime: @unchecked Sendable {
         try streamHandler.bind(to: pauseCoordinator)
         let context = TrustedRuntimeFeatureContext(
             database: database,
-            signalBus: signalBus,
             policyEngine: policyEngine,
             actionExecutor: actionExecutor,
             pauseCoordinator: pauseCoordinator,
@@ -208,7 +178,6 @@ public final class TrustedRuntime: @unchecked Sendable {
         let features = featureBuilder(context)
 
         self.database = database
-        self.signalBus = signalBus
         self.policyEngine = policyEngine
         self.actionExecutor = actionExecutor
         self.pauseCoordinator = pauseCoordinator
@@ -219,21 +188,16 @@ public final class TrustedRuntime: @unchecked Sendable {
         )
         self.capabilities = TrustedRuntimeCapabilities(
             backendContinuationConfigured: true,
-            claudeHooksConfigured: features.claudeHookReceiver != nil,
-            dictationConfigured: features.dictationRuntime != nil,
             liveVoiceConfigured: features.liveVoiceRuntime != nil
         )
         self.runStreamHandler = streamHandler
         self.runAuthorityRegistry = registry
-        self.dictationRuntime = features.dictationRuntime
         self.liveVoiceRuntime = features.liveVoiceRuntime
-        self.learningManager = agentOS.learningManager
         self.voiceActionAuthorityStore = features.voiceActionAuthorityStore
         self.cuaDriverHost = cuaDriverHost
         self.durableContinuationDispatcher = dispatcher
         self.agentOSRunClient = agentOS.client
         self.authenticatedContextProvider = agentOS.authenticatedContextProvider
-        self.claudeHookReceiver = features.claudeHookReceiver
     }
 
     /// Starts the reusable Menso Agent. Open-ended chat has no local action
@@ -303,13 +267,10 @@ public final class TrustedRuntime: @unchecked Sendable {
         _ = await permissionHealthMonitor.refresh()
         await pauseCoordinator.restorePendingReviews()
         await durableContinuationDispatcher?.startRetrying()
-        if let claudeHookReceiver { try? await claudeHookReceiver.start() }
     }
 
     public func stop() async {
         await durableContinuationDispatcher?.stop()
-        await claudeHookReceiver?.stop()
-        await dictationRuntime?.cancel()
         await liveVoiceRuntime?.stop()
         await cuaDriverHost.stop()
     }

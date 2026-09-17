@@ -1,13 +1,8 @@
 import Foundation
-import Security
 
 public enum TrustedRuntimeProvisioningState: Sendable, Hashable {
     case unconfigured
     case configured(TrustedRuntimeConfigurationSummary)
-}
-
-public enum TrustedRuntimeProvisioningError: Error, Sendable, Equatable {
-    case randomGenerationFailed
 }
 
 /// App-owned configuration surface for authenticated AgentOS. Saving verifies the supplied bearer subject against the
@@ -75,46 +70,4 @@ public actor TrustedRuntimeProvisioningCoordinator {
         try await loader.clear()
     }
 
-    /// Claude hooks are independently optional. The token is generated inside
-    /// the signed app and can be exported by explicit user action for the
-    /// plugin environment; it is never derived from an AgentOS token.
-    public func provisionClaudeHookToken() async throws -> String {
-        if let existing = try await secretStore.string(
-            service: Self.claudeHookKeychainService,
-            account: Self.claudeHookTokenAccount
-        ), existing.utf8.count >= 32 {
-            return existing
-        }
-        var bytes = [UInt8](repeating: 0, count: 32)
-        let status = bytes.withUnsafeMutableBytes { buffer in
-            SecRandomCopyBytes(kSecRandomDefault, buffer.count, buffer.baseAddress!)
-        }
-        guard status == errSecSuccess else {
-            throw TrustedRuntimeProvisioningError.randomGenerationFailed
-        }
-        let token = Data(bytes).base64EncodedString()
-        try await secretStore.setString(
-            token,
-            service: Self.claudeHookKeychainService,
-            account: Self.claudeHookTokenAccount
-        )
-        return token
-    }
-
-    public func claudeHookToken() async throws -> String? {
-        try await secretStore.string(
-            service: Self.claudeHookKeychainService,
-            account: Self.claudeHookTokenAccount
-        )
-    }
-
-    public func clearClaudeHookToken() async throws {
-        try await secretStore.delete(
-            service: Self.claudeHookKeychainService,
-            account: Self.claudeHookTokenAccount
-        )
-    }
-
-    public static let claudeHookKeychainService = "com.menso.claude-hook"
-    public static let claudeHookTokenAccount = "bearer-token-v1"
 }

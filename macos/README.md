@@ -1,33 +1,30 @@
 # Menso for macOS
 
-This directory contains Menso's native macOS 14+ client. It is Apple Silicon-first and uses AppKit for window/process integration, SwiftUI for composition, GRDB 7 for local durable state, and Sparkle 2.9.4 for signed out-of-App-Store updates.
+Menso is a regular macOS 14+ desktop app with a Dock icon, one resizable window, native menus, and Settings. AppKit owns the window; SwiftUI shows a voice conversation, an exact-action preparation sheet, approve-once/decline decisions, and visible results.
 
-## Implemented client slice
+## Current client
 
-- Shell: an `LSUIElement` app with one fixed 320×520 transparent, nonactivating `NSPanel`, precise transparent-region hit testing, a 4 pt drag threshold, edge snap/peek, per-display position persistence, and a menu-bar recovery affordance.
-- Presentation: native robot sprite states, a pure-SwiftUI expanded/collapsed morph, Apps/Agents/Actions tabs, approval bubbles beside the collapsed robot, and Control–Option–Return / Control–Option–Escape global approval hotkeys. The Carbon hotkeys do not require Input Monitoring.
-- App monitoring: `NSWorkspace` lifecycle/activation observation, same-user `libproc` CPU and physical-footprint sampling, responsible-process grouping, optional frontmost Accessibility title lookup, idle timing, and screen sleep/wake handling.
-- Agent metering: bounded incremental JSONL reads with persisted inode/offset cursors, defensive Claude Code and Codex parsers, delta-only Codex token accounting, process liveness, local quota projections, and oversized-fragment progress guarantees.
-- File discovery: root-level FSEvents coalesces telemetry changes into immediate refreshes; per-file kqueue/`DispatchSource` watchers trigger sub-second reads and retire descriptors on rename, delete, or revoke; bounded timer polling remains the reconciliation path and discovers roots created after launch.
-- Durable safety state: action audit transitions, pre-side-effect idempotency reservations, terminal execution results, trusted run authority, pending reviews, and endpoint-specific continuation envelopes are persisted in GRDB. The volatile fallback is only for non-authoritative monitor/window settings; desktop action execution must use the SQLite stores and fail closed.
-- Trusted runtime: authenticated AgentOS identity verification, typed SSE pause ingestion, durable run authority, endpoint-specific continuation outbox, permission health, and the pinned embedded CUA host are composed from the app only after durable storage and configuration gates succeed.
-- Audio: dictation capture/conversion, hotkey, HUD, insertion boundaries, native WebRTC Realtime transport, bounded reconnect continuity, and speaker/headphone AEC policy are implemented. Dictation remains disabled without a reviewed transcriber/model, and live voice remains disabled until its complete authenticated delegation composition is available.
+- OpenAI `gpt-live-1` over native WebRTC with microphone input and speaker output.
+- SDP negotiation through the authenticated Menso backend; the provider key stays server-side.
+- Live transcript deltas, client delegation to the Menso Agent, bounded continuity and reconnects.
+- Four typed Mac actions: open app, focus window, insert exact text, set control.
+- Local approval, target/content binding, receipt verification, SQLite audit, durable continuation delivery.
+- Settings for a server URL and product credentials. Secrets stay in device Keychain. Restart after changing credentials.
+- The microphone is off until you start a conversation. Ending it or closing the window stops voice. Accessibility is requested only for Mac actions.
 
-The app never reads Claude credentials or calls subscription OAuth usage endpoints. Claude quota is explicitly a local estimate. Codex rate-limit observations come from Codex's local rollout events.
+The floating widget, monitoring, token dashboards, Claude hooks, dictation, learning UI, global hotkeys, and updater UI were removed. Old database tables remain for compatibility and no existing user records were purged.
 
-## Updates
+## Running after authorization
 
-`Package.swift` pins the official `Sparkle` product to exactly 2.9.4. That patch release includes an activation fix for backgrounded/dockless apps, which matters for this `LSUIElement` process.
+Configure the backend with GPT-Live access and product JWT scopes `live:connect` and `agents:menso:run`. Existing `realtime:connect` tokens need reissuing. Debug builds can use the ignored `backend/.local-auth` token; release builds use Settings.
 
-`AppUpdaterController` creates `SPUStandardUpdaterController` programmatically and the status menu exposes **Check for Updates…**. Sparkle starts only when the packaged bundle contains all of the following:
+The app must be packaged and installed in Applications for signed-app permissions and the embedded driver boundary. Command-line binary launches are not substitutes for TCC validation.
 
-- an HTTPS `SUFeedURL` with no embedded credentials;
-- a base64 Ed25519 `SUPublicEDKey` that decodes to 32 bytes;
-- `SURequireSignedFeed = true`;
-- `SUVerifyUpdateBeforeExtraction = true`;
-- `SUSignedFeedFailureExpirationInterval = 0`, so a bad feed signature never expires into a weaker fallback.
+No build, compiler, lint, formatter, test, preview, or live voice/action check was run for this change. SwiftUI guidance informed the single-window layout; visual behavior is still unverified.
 
-The checked-in plist contains placeholders. Development executable launches therefore keep updates disabled instead of contacting a placeholder endpoint. Release packaging replaces the placeholders before signing; it never stores the private Ed25519 key in the app.
+## Release infrastructure
+
+The existing signing/notarization scripts and pinned Sparkle packaging dependencies remain as release infrastructure; this reduced app does not start a Sparkle updater. Release work and public hosting are separate authorized steps.
 
 ## Release lane
 
@@ -68,21 +65,8 @@ scripts/release-macos.sh /absolute/archive-directory/Menso.app /absolute/release
 
 `release-macos.sh` requires the corresponding `MENSO_*` environment variables documented directly in the script. Never commit exported `.p12`, `.p8`, or Sparkle private keys. `Resources/appcast.xml.template` is only a generator seed; do not publish it or manually edit an appcast after `generate_appcast` signs it.
 
-## Bundle and privacy
+## Remaining release inputs
 
-`Resources/Info.plist` is the bundle template, `Menso.entitlements` is the hardened-runtime entitlement set, and `Resources/PrivacyCopy.json` contains onboarding copy. Accessibility has no Info.plist usage-description prompt. The current semantic CUA path is AX-only and never requests screenshots, so Screen Recording is not required. The panel composes explicit Accessibility, microphone, and Speech Recognition permission health; moving the app to `/Applications` remains a prerequisite for trusted-runtime enablement.
+The release requires original AppIcon.icns artwork, Apple signing/notarization credentials, the pinned embedded CUA executable, and the external hosting credentials referenced by the release scripts. The scripts have not been exercised for this simplification.
 
-The status item uses an SF Symbol while original robot artwork is pending. A release must replace `Resources/AppIcon.icns.placeholder` with an original `Resources/AppIcon.icns` containing 16, 32, 128, 256, 512, and 1024 px representations; the packaging script fails if it is absent.
-
-For local SwiftPM debug runs, `backend/scripts/generate_local_auth.sh` creates an ignored JWT and expiry under `backend/.local-auth/`. When no connection has previously been stored, the debug app reads that token in memory, fixes the endpoint to `http://127.0.0.1:8000`, and verifies it with AgentOS. This avoids requiring Data Protection Keychain access from an unsigned debug executable and is excluded from release builds; signed release builds remain Keychain-only.
-
-## Remaining external release inputs
-
-- Developer ID membership, certificate, Team identity, and protected `macos-release` environment.
-- App Store Connect notarization API credentials.
-- One retained Sparkle Ed25519 keypair and an HTTPS host for the appcast, DMGs, deltas, and release notes.
-- Original licensed app icon artwork.
-- Signed-device compatibility exercises for the generic CUA operations and the on-device Apple Speech dictation adapter.
-- A publication adapter for the chosen HTTPS host, historical archives if delta generation is desired, and an older signed/notarized build for an end-to-end update rehearsal.
-
-No local build, test, lint, package-resolution, signing, notarization, workflow, or runtime check was run while implementing this slice, per repository instruction.
+The bundle requests microphone access for live voice and Accessibility for approved Mac actions. No dictation, screen-capture, monitoring, or hook feature starts.

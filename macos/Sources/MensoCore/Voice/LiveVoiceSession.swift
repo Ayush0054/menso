@@ -42,19 +42,22 @@ public struct LiveVoiceAudioFrame: Sendable, Hashable {
 
 public struct LiveVoiceClientAccess: Sendable, Hashable {
     public let endpoint: URL
-    public let ephemeralCredential: String
+    public let accessToken: String
     public let expiresAt: Date
 
-    public init(endpoint: URL, ephemeralCredential: String, expiresAt: Date) throws {
-        guard endpoint.scheme?.lowercased() == "https",
+    public init(endpoint: URL, accessToken: String, expiresAt: Date) throws {
+        let loopback = ["localhost", "127.0.0.1", "::1"].contains(endpoint.host?.lowercased() ?? "")
+        guard (endpoint.scheme?.lowercased() == "https" || (endpoint.scheme == "http" && loopback)),
               endpoint.user == nil,
               endpoint.password == nil,
-              !ephemeralCredential.isEmpty
+              endpoint.query == nil,
+              endpoint.fragment == nil,
+              !accessToken.isEmpty
         else {
             throw LiveVoiceError.invalidClientAccess
         }
         self.endpoint = endpoint
-        self.ephemeralCredential = ephemeralCredential
+        self.accessToken = accessToken
         self.expiresAt = expiresAt
     }
 }
@@ -205,7 +208,17 @@ public protocol LiveVoiceSessionDelegate: Sendable {
     func liveVoiceSession(didReceive event: LiveVoiceSessionEvent) async
 }
 
-/// Provider-neutral media and tool boundary. OpenAI Realtime event names do not escape an adapter.
+/// UI observations carry no action authority.
+public enum LiveVoiceUpdate: Sendable {
+    case state(LiveVoiceSessionState)
+    case transcript(LiveTranscriptSegment)
+    case working(Bool)
+    case actionPrepared(Bool)
+    case result(VoiceDelegationResult)
+    case error(String)
+}
+
+/// Provider-neutral media and tool boundary. OpenAI GPT-Live event names do not escape an adapter.
 public protocol LiveVoiceSession: Sendable {
     /// True when the provider transport owns microphone capture directly (for
     /// example WebRTC's native audio track). Callers must not create a competing
@@ -222,7 +235,7 @@ public protocol LiveVoiceSession: Sendable {
     func sendDelegationResult(callID: String, result: VoiceDelegationResult) async throws
     /// Inserts bounded, non-executable context into a replacement provider
     /// conversation. Implementations must not translate records from a prior
-    /// provider session into `function_call_output` events.
+    /// provider session into fresh executable requests.
     func restoreContinuity(_ context: LiveVoiceContinuationContext) async throws
     func disconnect() async
 }
@@ -301,8 +314,8 @@ public protocol TrustedVoiceOperationRecognizing: Sendable {
     ) async -> TrustedVoiceActionAuthority?
 }
 
-/// One-shot authority selected by the user in the signed app. Realtime may ask
-/// for a `desktop_action`, but it cannot create or modify this target/operation.
+/// One-shot authority selected by the user for the next client delegation.
+/// GPT-Live cannot create or modify the prepared target or operation.
 public actor UserStagedVoiceActionAuthorityStore: TrustedVoiceOperationRecognizing {
     private struct StagedAuthority: Sendable {
         let authority: TrustedVoiceActionAuthority
@@ -338,8 +351,7 @@ public actor UserStagedVoiceActionAuthorityStore: TrustedVoiceOperationRecognizi
     public func recognizedActionAuthority(
         for request: VoiceDelegationRequest
     ) async -> TrustedVoiceActionAuthority? {
-        guard request.operationHint == .desktopAction,
-              let current = staged,
+        guard let current = staged,
               current.expiresAt > Date()
         else {
             if (staged?.expiresAt ?? .distantFuture) <= Date() { staged = nil }
@@ -425,7 +437,7 @@ private final class GenerationScopedLiveVoiceDelegate: LiveVoiceSessionDelegate,
 
 /// Keeps the live media loop responsive while delegated AgentOS work completes
 /// separately. The product session ID remains stable while each replacement
-/// Realtime transport receives a new credential and a new provider-session ID.
+/// GPT-Live transport receives a new credential and a new provider-session ID.
 public actor LiveVoiceCoordinator {
     private let identity: (userID: UserID, sessionID: ProductSessionID)
     private let accessProvider: any LiveVoiceClientAccessProviding
@@ -444,7 +456,11 @@ public actor LiveVoiceCoordinator {
     private var activeCallRecordIDs: [String: String] = [:]
     private var checkpoint: LiveVoiceContinuityCheckpoint?
     private var checkpointPersistenceHealthy = true
-    private var state: LiveVoiceSessionState = .idle
+    private var observers: [UUID: AsyncStream<LiveVoiceUpdate>.Continuation] = [:]
+    private var state: LiveVoiceSessionState = .idle {
+        didSet { publish(.state(state)) }
+    }
+    private var activeDelegations = 0
     private var desiredRunning = false
     private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
@@ -587,6 +603,23 @@ public actor LiveVoiceCoordinator {
 
     public func currentState() -> LiveVoiceSessionState { state }
 
+    public func updates() -> AsyncStream<LiveVoiceUpdate> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream<LiveVoiceUpdate>.makeStream(bufferingPolicy: .bufferingNewest(128))
+        observers[id] = continuation
+        continuation.yield(.state(state))
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeObserver(id) }
+        }
+        return stream
+    }
+
+    private func removeObserver(_ id: UUID) { observers.removeValue(forKey: id) }
+
+    private func publish(_ update: LiveVoiceUpdate) {
+        for observer in observers.values { observer.yield(update) }
+    }
+
     fileprivate func receive(_ event: LiveVoiceSessionEvent, fromGeneration eventGeneration: UInt64) async {
         guard eventGeneration == generation else { return }
         switch event {
@@ -619,7 +652,10 @@ public actor LiveVoiceCoordinator {
         case .stateChanged(.idle):
             state = .idle
         case let .transcript(segment) where segment.isFinal:
+            publish(.transcript(segment))
             await recordFinalTranscript(segment)
+        case .recoverableError:
+            publish(.error("The voice connection encountered a problem. You can end the conversation and try again."))
         case let .delegationRequested(request):
             await acceptDelegation(request)
         default:
@@ -677,7 +713,14 @@ public actor LiveVoiceCoordinator {
     }
 
     private func performDelegation(_ request: VoiceDelegationRequest, recordID: String) async {
+        activeDelegations += 1
+        publish(.working(true))
+        defer {
+            activeDelegations -= 1
+            publish(.working(activeDelegations > 0))
+        }
         let authority = await operationRecognizer.recognizedActionAuthority(for: request)
+        if authority != nil { publish(.actionPrepared(false)) }
         let route = await router.route(request)
         let result: VoiceDelegationResult
         do {
@@ -706,6 +749,7 @@ public actor LiveVoiceCoordinator {
                 updatedAt: now()
             )
             try await upsertAndPersist(completed)
+            publish(.result(result))
             await deliverPendingDelegationResult(recordID: recordID)
             if providerSessionID != completed.providerSessionID {
                 continuityRetryTask?.cancel()
@@ -959,7 +1003,7 @@ public actor LiveVoiceCoordinator {
         guard !text.isEmpty else { return }
         let bounded = LiveTranscriptSegment(speaker: segment.speaker, text: text, isFinal: true)
         var transcript = current.finalTranscript
-        if transcript.last != bounded { transcript.append(bounded) }
+        transcript.append(bounded)
         transcript = Array(transcript.suffix(LiveVoiceContinuityLimits.maximumFinalTranscriptSegments))
         do {
             current = try LiveVoiceContinuityCheckpoint(
