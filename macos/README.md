@@ -30,6 +30,8 @@ open macos/.build/local-app
 
 Quit the existing Menso app, then move the freshly packaged app into Applications and launch that copy. The packaging script asks SwiftPM for its current output directory; do not manually copy from a cached architecture directory. Rebuilding an ad-hoc signed app can require renewed macOS permissions.
 
+Packaging verifies the original pinned CUA driver and policy before signing. It then records the re-signed helper's SHA-256 as `packaged_binary_sha256` in the bundle-only manifest, before signing the outer app. Runtime checks the app's code signature/resource seal and that final digest; the upstream `binary_sha256` pin remains unchanged. Do not re-sign the helper after sealing the app or copy the source manifest over the packaged one.
+
 Earlier desktop/GPT-Live checks predate this migration. The TypeSafe path has not been built, installed, or tested. Pending native reviews expire after three minutes and are not restored after quitting; ask again after restart. Terminal results and execution reservations remain in SQLite. See [validation scope](../docs/IMPLEMENTATION_STATUS.md).
 
 ## Release infrastructure

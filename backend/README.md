@@ -1,5 +1,11 @@
 # Menso backend
 
+## Native task loop (source-only)
+
+New Mac clients use authenticated `POST /menso/actions/next` with the original utterance, fresh native candidates, and at most eight verified completed-step descriptions. TypeSafe selects the next candidate or stops as `complete`, `unclear`, or `unsupported`. Completion is not offered without progress. The Mac—not this endpoint—owns local verification, step budgets, cancellation, automatic navigation policy, and review for writes. Update backend and Mac together; older `/menso/actions/select` clients remain supported.
+
+The backend does not run CUA. Swift hosts the bundled native driver through private MCP. Browser-native tool integration is not implemented in this revision; see the main README's expandable architecture sections. No provider calls, builds, tests, or deployment have been run for the task-loop changes.
+
 The backend hosts a TypeSafe action selector, verified JWT authentication, existing Postgres state, and GPT-Live session negotiation. It has no desktop execution privileges, LearningMachine, workflows, schedules, or public MCP server.
 
 Agno stays pinned at 2.8.5 only for the existing AgentOS HTTP/JWT/database host. No agent is registered. The legacy agent/tool/continuation source remains for compatibility, but the desktop no longer calls its run endpoints.

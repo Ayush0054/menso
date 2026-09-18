@@ -176,9 +176,14 @@ public actor ActionExecutor {
 
         let result: ActionResult
         do {
+            try Task.checkCancellation()
             result = try await broker.execute(request)
+        } catch is CancellationError {
+            result = .failure(for: request, code: .cancelled)
         } catch let error as LocalToolBrokerError {
             result = .failure(for: request, code: Self.errorCode(for: error))
+        } catch let error as PinnedEmbeddedCuaDriverHostError {
+            result = .failure(for: request, code: error == .toolRejected ? .driverToolRejected : .driverProtocolFailure)
         } catch {
             result = .failure(for: request, code: .unknown)
         }
@@ -250,6 +255,8 @@ public actor ActionExecutor {
         case .contentMismatch: .contentMismatch
         case .verificationFailed: .verificationFailed
         case .driverUnavailable: .transportUnavailable
+        case .driverIntegrityFailed: .driverIntegrityFailed
+        case .driverPermissionMissing: .driverPermissionMissing
         case .persistenceFailure: .persistenceFailure
         }
     }

@@ -7,8 +7,10 @@ enum VoiceDelegationFailure {
         switch error {
         case TypeSafeActionError.notConfigured:
             return "Mac actions need a TypeSafe API key on the Menso backend. Configure TYPESAFE_API_KEY, then restart the API."
+        case TypeSafeActionError.authenticationFailed:
+            return "TypeSafe rejected the backend credentials. Update TYPESAFE_API_KEY with a valid TypeSafe key, then recreate the Menso API container."
         case TypeSafeActionError.unavailable:
-            return "TypeSafe couldn't select an action. Check the backend connection and TypeSafe key, then try again."
+            return "The action selection service failed. Check the Menso API logs for the cause before trying again."
         case AgentOSClientError.expiredAccessToken,
              AgentOSClientError.httpStatus(401), AgentOSClientError.httpStatus(403):
             return "The task connection needs authentication. Check your Menso connection in Settings."

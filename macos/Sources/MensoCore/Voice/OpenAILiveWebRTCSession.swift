@@ -183,7 +183,8 @@ public final class OpenAILiveWebRTCSession: NSObject, LiveVoiceSession, @uncheck
         try append(
             type: "session.commentary.append",
             callID: callID,
-            content: "Task status: \(result.status.rawValue). \(result.spokenSummary)"
+            content: (result.status == .completed ? "" : "Do not infer nothing ran; earlier steps or an unverified step may have changed the Mac. ")
+                + "Task status: \(result.status.rawValue). \(result.spokenSummary)"
         )
         withStorage { $0.pendingCallIDs.remove(callID) }
     }

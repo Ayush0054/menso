@@ -214,7 +214,7 @@ struct MensoRootView: View {
             }
             Text(model.isConversationActive
                  ? "Microphone on · App names and focused-target details help resolve your requests."
-                 : "Microphone off · Speak to request an action. Approve before it runs.")
+                 : "Microphone off · Request a task. Navigation runs automatically; changes need approval.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 32).padding(.vertical, 24)

@@ -8,7 +8,7 @@ public struct VoiceActionCandidate: Codable, Sendable, Hashable {
 }
 
 public struct VoiceActionSelection: Codable, Sendable, Hashable {
-    public enum Status: String, Codable, Sendable { case selected, unclear, unsupported }
+    public enum Status: String, Codable, Sendable { case selected, unclear, unsupported, complete }
     public let status: Status
     public let candidateID: String?
 
@@ -20,13 +20,27 @@ public struct VoiceActionSelection: Codable, Sendable, Hashable {
 
 public protocol VoiceActionSelecting: Sendable {
     func select(
-        utterance: String, candidates: [VoiceActionCandidate], userID: UserID
+        utterance: String, candidates: [VoiceActionCandidate], completedSteps: [VoiceActionCandidate], userID: UserID
     ) async throws -> VoiceActionSelection
 }
 
-public enum TypeSafeActionError: Error, Sendable {
+public enum TypeSafeActionError: Error, Sendable, Equatable {
     case notConfigured
+    case authenticationFailed
     case unavailable
+
+    private struct ErrorEnvelope: Decodable {
+        struct Detail: Decodable { let code: String }
+        let detail: Detail
+    }
+
+    static func gatewayFailure(from data: Data) -> Self {
+        guard data.count <= 16_384,
+              let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: data),
+              envelope.detail.code == "typesafe_authentication_failed"
+        else { return .unavailable }
+        return .authenticationFailed
+    }
 }
 
 private final class NoActionRedirects: NSObject, URLSessionTaskDelegate, Sendable {
@@ -43,6 +57,7 @@ public struct TypeSafeActionSelector: VoiceActionSelecting {
     private struct Body: Encodable {
         let utterance: String
         let candidates: [VoiceActionCandidate]
+        let completed_steps: [VoiceActionCandidate]
     }
     private let configuration: AgentOSConnectionConfiguration
     private let tokenProvider: any AgentOSAccessTokenProvider
@@ -58,7 +73,7 @@ public struct TypeSafeActionSelector: VoiceActionSelecting {
     }
 
     public func select(
-        utterance: String, candidates: [VoiceActionCandidate], userID: UserID
+        utterance: String, candidates: [VoiceActionCandidate], completedSteps: [VoiceActionCandidate], userID: UserID
     ) async throws -> VoiceActionSelection {
         let token = try await tokenProvider.accessToken()
         guard token.expiresAt > Date(), !token.value.isEmpty else {
@@ -70,23 +85,26 @@ public struct TypeSafeActionSelector: VoiceActionSelecting {
         ).fetchContext()
         guard identity.userID == userID else { throw AgentOSClientError.authenticatedIdentityMismatch }
         try Task.checkCancellation()
-        var request = URLRequest(url: configuration.baseURL.appendingPathComponent("menso/actions/select"))
+        var request = URLRequest(url: configuration.baseURL.appendingPathComponent("menso/actions/next"))
         request.httpMethod = "POST"
         request.timeoutInterval = 30
         request.setValue("Bearer \(token.value)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
-        request.httpBody = try JSONEncoder().encode(Body(utterance: utterance, candidates: candidates))
+        request.httpBody = try JSONEncoder().encode(Body(utterance: utterance, candidates: candidates, completed_steps: completedSteps))
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw AgentOSClientError.invalidResponse }
         switch http.statusCode {
         case 200: break
         case 503: throw TypeSafeActionError.notConfigured
-        case 502: throw TypeSafeActionError.unavailable
+        case 502: throw TypeSafeActionError.gatewayFailure(from: data)
         default: throw AgentOSClientError.httpStatus(http.statusCode)
         }
         guard data.count <= 16_384 else { throw AgentOSClientError.invalidResponse }
         let result = try JSONDecoder().decode(VoiceActionSelection.self, from: data)
+        guard result.status != .complete || !completedSteps.isEmpty else {
+            throw AgentOSClientError.invalidResponse
+        }
         if result.status == .selected {
             guard let id = result.candidateID, candidates.contains(where: { $0.id == id }) else {
                 throw AgentOSClientError.invalidResponse

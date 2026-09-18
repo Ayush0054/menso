@@ -124,6 +124,7 @@ fi
 
 # Sparkle's binary distribution includes nested helpers. Sign inside-out and do
 # not use --deep, preserving the Downloader service entitlement where present.
+/bin/zsh "$script_directory/cua-driver-integrity.sh" verify-input "$app_path"
 sparkle_version_root="$sparkle_framework/Versions/B"
 for nested_bundle in \
   "$sparkle_version_root/XPCServices/Installer.xpc" \
@@ -146,6 +147,7 @@ codesign --force --timestamp --options runtime \
   --sign "$MENSO_DEVELOPER_ID_APPLICATION" "$webrtc_framework"
 codesign --force --timestamp --options runtime \
   --sign "$MENSO_DEVELOPER_ID_APPLICATION" "$cua_driver"
+/bin/zsh "$script_directory/cua-driver-integrity.sh" record-signed "$app_path"
 codesign --force --timestamp --options runtime --entitlements "$macos_root/Menso.entitlements" \
   --sign "$MENSO_DEVELOPER_ID_APPLICATION" "$app_path"
 

@@ -5,10 +5,25 @@ import unittest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.actions import Candidate, SelectionRequest, resolve_answer
+from app.actions import Candidate, SelectionRequest, provider_failure, resolve_answer
 
 
 class ActionSelectionTests(unittest.TestCase):
+    def test_provider_credentials_are_not_reported_as_product_jwt_failure(self) -> None:
+        for status_code in [401, 403]:
+            with self.assertLogs("app.actions", level="WARNING") as logs:
+                error = provider_failure(status_code)
+            self.assertEqual(error.status_code, 502)
+            self.assertEqual(error.detail, {"code": "typesafe_authentication_failed"})
+            self.assertEqual(error.headers, {"Cache-Control": "no-store"})
+            self.assertIn(f"upstream_status={status_code}", logs.output[0])
+
+    def test_other_provider_errors_do_not_blame_credentials(self) -> None:
+        for status_code in [422, 429, 500, 529]:
+            with self.assertLogs("app.actions", level="WARNING"):
+                error = provider_failure(status_code)
+            self.assertEqual(error.detail, {"code": "typesafe_unavailable"})
+
     def setUp(self) -> None:
         self.candidates = [Candidate(id="action_0", kind="open_application", description="Open Example")]
 
@@ -48,3 +63,13 @@ class ActionSelectionTests(unittest.TestCase):
     def test_duplicate_candidate_ids_are_rejected(self) -> None:
         with self.assertRaises(ValidationError):
             SelectionRequest(utterance="Open Example", candidates=self.candidates * 2)
+
+    def test_completion_requires_task_loop_with_verified_progress(self) -> None:
+        payload = self.answer(choice="complete")
+        with self.assertRaises(HTTPException):
+            resolve_answer(payload, self.candidates)
+        self.assertEqual(resolve_answer(payload, self.candidates, allow_complete=True).status, "complete")
+
+    def test_task_progress_is_bounded(self) -> None:
+        with self.assertRaises(ValidationError):
+            SelectionRequest(utterance="Open Example", candidates=self.candidates, completed_steps=self.candidates * 9)

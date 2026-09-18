@@ -175,6 +175,8 @@ public enum LocalToolBrokerError: Error, Sendable, Equatable {
     case contentMismatch
     case verificationFailed
     case driverUnavailable
+    case driverIntegrityFailed
+    case driverPermissionMissing
     case persistenceFailure
 }
 
@@ -198,6 +200,16 @@ public actor LocalToolBroker: SemanticActionBroker {
         let transport: any CUASemanticTransport
         do {
             transport = try await host.semanticTransport()
+        } catch let error as PinnedEmbeddedCuaDriverHostError {
+            switch error {
+            case .resourceMissing, .invalidManifest, .invalidHostIdentity,
+                 .invalidHostSignature, .resourceHashMismatch:
+                throw LocalToolBrokerError.driverIntegrityFailed
+            case .hostAttributionMissing, .requiredPermissionMissing:
+                throw LocalToolBrokerError.driverPermissionMissing
+            default:
+                throw LocalToolBrokerError.driverUnavailable
+            }
         } catch {
             throw LocalToolBrokerError.driverUnavailable
         }

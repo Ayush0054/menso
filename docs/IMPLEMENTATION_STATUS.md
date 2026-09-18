@@ -8,13 +8,23 @@ This document separates implemented source from the local checks actually comple
 | --- | --- |
 | Desktop app | Regular Dock app, one resizable AppKit window, native SwiftUI content, standard menu and Settings |
 | Voice | GPT-Live `gpt-live-1`, authenticated server SDP exchange, native WebRTC, transcript deltas, client delegation, reconnects and explicit close |
-| Task backend | TypeSafe Choice selects one native candidate; AgentOS retained for verified JWT/HTTP/database hosting, no registered Agent |
-| Mac actions | Voice-proposed open/switch app, focus window, insert text, set control; native target matching and mandatory local approval |
+| Task backend | TypeSafe Choice selects the next native candidate with verified progress via `/menso/actions/next`; AgentOS remains HTTP/JWT/database hosting |
+| Mac actions | Bounded task loop over open/switch app, focus window, insert text, set control; automatic native navigation, review for writes |
 | Approval | Approve once or decline; exact action binding, expiry, durable audit, receipt verification |
 | Results | In-window result status, saved voice-result delivery, concise verified voice result |
 | Connection | Server URL and product credentials in Settings; device Keychain; restart after changes |
 
 ## Removed
+
+### Latest task-loop source (not tested or installed)
+
+The Mac now owns repeated observe/select/execute/verify steps for one request, with eight-step and between-step deadline limits, per-step identity/target checks, duplicate/overlap prevention, cancellation when the conversation ends, and partial verified receipts. Native navigation does not show an approval card; writes still do. Driver tool refusals and protocol failures are distinct from verification failure, and voice output must not infer no side effects from uncertainty.
+
+The attempted custom browser tab-bar implementation was removed. Native CUA browser support is not wired, and no browser-new-tab capability is advertised. The pinned driver's existing-profile attachment does not support Brave; changing profile/permission strategy is not silently enabled. The README includes collapsible code-architecture and CUA integration sections.
+
+No tests, compiler/build, packaging, or live checks were run for these task-loop changes. The earlier single-action revision passed 18 targeted Swift tests and was installed, and the user confirmed VS Code opened and verified. Those results do not validate the task loop.
+
+### Earlier product cleanup
 
 Floating widget/robot, screen-edge modes, app/process monitoring, coding-agent token dashboards, Claude hooks, dictation/HUD/hotkeys, learning management and LearningMachine, improvement/deployment/eval workflows, schedules, and the public MCP server.
 

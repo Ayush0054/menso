@@ -378,7 +378,12 @@ public actor UserStagedVoiceActionAuthorityStore: TrustedVoiceOperationRecognizi
 }
 
 public protocol MensoVoiceDelegating: Sendable {
+    func cancelAll() async
     func delegate(_ delegation: AuthenticatedVoiceDelegation) async throws -> VoiceDelegationResult
+}
+
+public extension MensoVoiceDelegating {
+    func cancelAll() async {}
 }
 
 public struct LiveVoiceReconnectPolicy: Sendable, Hashable {
@@ -597,6 +602,7 @@ public actor LiveVoiceCoordinator {
 
     public func stop() async {
         desiredRunning = false
+        await delegationBridge.cancelAll()
         reconnectTask?.cancel()
         reconnectTask = nil
         connectionWatchdogTask?.cancel()
@@ -741,6 +747,7 @@ public actor LiveVoiceCoordinator {
         let route = await router.route(request)
         let result: VoiceDelegationResult
         do {
+            guard desiredRunning else { throw CancellationError() }
             result = try await delegationBridge.delegate(
                 AuthenticatedVoiceDelegation(
                     request: request,

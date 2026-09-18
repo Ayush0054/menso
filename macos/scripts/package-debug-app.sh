@@ -50,13 +50,16 @@ ditto "$sparkle_framework" "$bundle_path/Contents/Frameworks/Sparkle.framework"
 ditto "$webrtc_framework" "$bundle_path/Contents/Frameworks/WebRTC.framework"
 
 chmod 755 "$bundle_path/Contents/MacOS/MensoApp" "$bundle_path/Contents/Helpers/cua-driver"
+/bin/zsh "$script_directory/cua-driver-integrity.sh" verify-input "$bundle_path"
 /usr/bin/codesign --force --deep --sign - --timestamp=none \
   "$bundle_path/Contents/Frameworks/Sparkle.framework"
 /usr/bin/codesign --force --deep --sign - --timestamp=none \
   "$bundle_path/Contents/Frameworks/WebRTC.framework"
 /usr/bin/codesign --force --sign - --timestamp=none \
   "$bundle_path/Contents/Helpers/cua-driver"
-/usr/bin/codesign --force --deep --sign - --timestamp=none \
+/bin/zsh "$script_directory/cua-driver-integrity.sh" record-signed "$bundle_path"
+# Do not re-sign the helper after recording its final digest.
+/usr/bin/codesign --force --sign - --timestamp=none \
   --entitlements "$macos_root/Menso.entitlements" \
   "$bundle_path"
 

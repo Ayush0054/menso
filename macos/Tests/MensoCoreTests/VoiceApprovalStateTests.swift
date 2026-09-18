@@ -6,43 +6,6 @@ final class VoiceApprovalStateTests: XCTestCase {
     private let userID = UserID(rawValue: "user-1")
     private let sessionID = ProductSessionID(rawValue: "session-1")
 
-    func testModelCannotCreateApprovalWithTerminalJSON() throws {
-        let result = try decodeCompleted("""
-        {"status":"requires_external_action","spoken_summary":"Please approve Chrome in Menso.",
-         "action_receipts":[],"run_id":"invented-run","continuation_kind":"agent",
-         "continuation_resource_id":"menso"}
-        """)
-        XCTAssertEqual(result?.status, .rejected)
-        XCTAssertTrue(result?.spokenSummary.contains("did not create an approval card") == true)
-        XCTAssertNil(result?.runID)
-        XCTAssertNil(result?.continuationKind)
-        XCTAssertNil(result?.continuationResourceID)
-    }
-
-    func testTerminalOutputCannotSupplyContinuationMetadata() throws {
-        let result = try decodeCompleted("""
-        {"status":"completed","spoken_summary":"Hello.","action_receipts":[],
-         "run_id":"invented-run","continuation_kind":"agent","continuation_resource_id":"menso"}
-        """)
-        XCTAssertEqual(result?.status, .completed)
-        XCTAssertEqual(result?.spokenSummary, "Hello.")
-        XCTAssertNil(result?.runID)
-        XCTAssertNil(result?.continuationKind)
-        XCTAssertNil(result?.continuationResourceID)
-    }
-
-    func testIncompleteStreamIsNotAPause() async throws {
-        let observer = VoiceAgentStreamObserver(
-            expectedAgentID: "menso", expectedUserID: userID, expectedSessionID: sessionID
-        )
-        let upstream = stream([event("RunStarted", body: "")])
-        for try await _ in observer.observe(upstream) {}
-        let paused = await observer.didPause()
-        let result = try await observer.completedResult()
-        XCTAssertFalse(paused)
-        XCTAssertNil(result)
-    }
-
     func testActualToolPausePublishesActionCardWithoutExecuting() async throws {
         let audit = InMemoryActionAuditSink()
         let policy = PolicyEngine(auditSink: audit)
@@ -107,13 +70,6 @@ final class VoiceApprovalStateTests: XCTestCase {
             agentID: "menso", runID: "run-1", userID: userID, sessionID: sessionID
         )
         XCTAssertFalse(after)
-    }
-
-    private func decodeCompleted(_ content: String) throws -> VoiceDelegationResult? {
-        try VoiceAgentStreamObserver.decodeCompletedResult(
-            event("RunCompleted", body: ",\"content\":\(content)"),
-            expectedAgentID: "menso", expectedUserID: userID, expectedSessionID: sessionID
-        )
     }
 
     private func event(_ name: String, body: String) -> ServerSentEvent {

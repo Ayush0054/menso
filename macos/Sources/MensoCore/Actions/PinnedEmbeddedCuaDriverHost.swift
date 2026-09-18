@@ -1,6 +1,8 @@
 import CryptoKit
 import Darwin
 import Foundation
+import Security
+import OSLog
 
 public struct EmbeddedCuaDriverResourceManifest: Decodable, Sendable, Hashable {
     public let version: String
@@ -8,6 +10,7 @@ public struct EmbeddedCuaDriverResourceManifest: Decodable, Sendable, Hashable {
     public let releaseCommit: String
     public let archiveSHA256: String
     public let binarySHA256: String
+    public let packagedBinarySHA256: String?
     public let sessionPolicySHA256: String
 
     enum CodingKeys: String, CodingKey {
@@ -16,6 +19,7 @@ public struct EmbeddedCuaDriverResourceManifest: Decodable, Sendable, Hashable {
         case releaseCommit = "release_commit"
         case archiveSHA256 = "archive_sha256"
         case binarySHA256 = "binary_sha256"
+        case packagedBinarySHA256 = "packaged_binary_sha256"
         case sessionPolicySHA256 = "session_policy_sha256"
     }
 }
@@ -24,12 +28,14 @@ public enum PinnedEmbeddedCuaDriverHostError: Error, Sendable, Equatable {
     case resourceMissing
     case invalidManifest
     case invalidHostIdentity
+    case invalidHostSignature
     case resourceHashMismatch
     case endpointConflict
     case spawnFailed
     case startupTimedOut
     case proxyFailed
     case protocolFailure
+    case toolRejected
     case incompatibleDriver
     case hostAttributionMissing
     case requiredPermissionMissing
@@ -222,6 +228,19 @@ public actor PinnedEmbeddedCuaDriverHost: EmbeddedCuaDriverHost {
         guard FileManager.default.isExecutableFile(atPath: binary.path) else {
             throw PinnedEmbeddedCuaDriverHostError.resourceMissing
         }
+        // Re-signing the reviewed helper changes its bytes. The packager records
+        // its final digest in the outer app's sealed resources. Validate that
+        // seal before trusting the packaging metadata; never accept an unsigned
+        // manifest as authority for a replacement helper.
+        var signedApp: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(bundle.bundleURL as CFURL, [], &signedApp) == errSecSuccess,
+              let signedApp,
+              SecStaticCodeCheckValidity(
+                  signedApp,
+                  SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckNestedCode),
+                  nil
+              ) == errSecSuccess
+        else { throw PinnedEmbeddedCuaDriverHostError.invalidHostSignature }
         let manifest: EmbeddedCuaDriverResourceManifest
         do {
             manifest = try JSONDecoder().decode(
@@ -235,7 +254,8 @@ public actor PinnedEmbeddedCuaDriverHost: EmbeddedCuaDriverHost {
               manifest.archiveSHA256 == reviewedArchiveSHA256,
               manifest.binarySHA256 == reviewedBinarySHA256,
               manifest.sessionPolicySHA256 == reviewedSessionPolicySHA256,
-              try Self.sha256(binary) == manifest.binarySHA256,
+              let packagedDigest = manifest.packagedBinarySHA256,
+              try Self.sha256(binary) == packagedDigest,
               try Self.sha256(policyURL) == manifest.sessionPolicySHA256
         else { throw PinnedEmbeddedCuaDriverHostError.resourceHashMismatch }
         return Resources(binary: binary, sessionPolicy: policyURL, bundleIdentifier: bundleIdentifier)
@@ -252,13 +272,21 @@ public actor PinnedEmbeddedCuaDriverHost: EmbeddedCuaDriverHost {
         return environment
     }
 
-    private static func makePrivateSocketPath() throws -> String {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+    static func makePrivateSocketPath(
+        in directory: URL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+    ) throws -> String {
+        // macOS's per-user temporary directory is already long. Keep the full
+        // random UUID, but leave room for both /var and /private/var spellings.
         let path = directory.appendingPathComponent(
-            "menso-cua-\(UUID().uuidString.lowercased()).sock",
+            "m-\(UUID().uuidString.lowercased()).sock",
             isDirectory: false
         ).path
-        guard path.utf8.count < 100 else { throw PinnedEmbeddedCuaDriverHostError.endpointConflict }
+        // sun_path must also hold the terminating NUL; measure bytes, not
+        // characters, and use the platform limit instead of an arbitrary 100.
+        let address = sockaddr_un()
+        guard path.utf8CString.count <= MemoryLayout.size(ofValue: address.sun_path) else {
+            throw PinnedEmbeddedCuaDriverHostError.endpointConflict
+        }
         return path
     }
 
@@ -449,10 +477,15 @@ private actor StdioCuaMCPClient: CuaMCPCalling {
             ])
         )
         guard envelope.fields["error"] == nil,
-              let result = envelope.fields["result"]?.objectValue,
-              result["isError"]?.boolValue != true,
-              result["is_error"]?.boolValue != true
-        else { throw PinnedEmbeddedCuaDriverHostError.protocolFailure }
+              let result = envelope.fields["result"]?.objectValue else {
+            Logger(subsystem: "com.menso.app", category: "CUA").error("Driver protocol failure: \(tool, privacy: .public)")
+            throw PinnedEmbeddedCuaDriverHostError.protocolFailure
+        }
+        guard result["isError"]?.boolValue != true, result["is_error"]?.boolValue != true else {
+            // Fixed tool name only, never returned text, screenshots, or user content.
+            Logger(subsystem: "com.menso.app", category: "CUA").error("Driver rejected tool: \(tool, privacy: .public)")
+            throw PinnedEmbeddedCuaDriverHostError.toolRejected
+        }
         return JSONObjectEnvelope(fields: result)
     }
 
@@ -485,6 +518,8 @@ private actor StdioCuaMCPClient: CuaMCPCalling {
         method: String,
         params: JSONValue
     ) async throws -> JSONObjectEnvelope {
+        try Task.checkCancellation()
+        let deadline = ContinuousClock().now.advanced(by: .seconds(30))
         try write(.object([
             "jsonrpc": .string("2.0"),
             "id": .number(.unsignedInteger(id)),
@@ -492,7 +527,7 @@ private actor StdioCuaMCPClient: CuaMCPCalling {
             "params": params,
         ]))
         while true {
-            let response = try readLine()
+            let response = try readLine(until: deadline)
             guard let object = response.objectValue else {
                 throw PinnedEmbeddedCuaDriverHostError.protocolFailure
             }
@@ -516,9 +551,20 @@ private actor StdioCuaMCPClient: CuaMCPCalling {
         try input.write(contentsOf: line)
     }
 
-    private func readLine() throws -> JSONValue {
+    private func readLine(until deadline: ContinuousClock.Instant) throws -> JSONValue {
         var data = Data()
         while data.count < Self.maximumLineBytes {
+            try Task.checkCancellation()
+            guard ContinuousClock().now < deadline else {
+                throw PinnedEmbeddedCuaDriverHostError.protocolFailure
+            }
+            var descriptor = pollfd(fd: output.fileDescriptor, events: Int16(POLLIN), revents: 0)
+            let ready = poll(&descriptor, 1, 100)
+            if ready == 0 { continue }
+            if ready < 0 {
+                if errno == EINTR { continue }
+                throw PinnedEmbeddedCuaDriverHostError.protocolFailure
+            }
             guard let byte = try output.read(upToCount: 1), !byte.isEmpty else {
                 throw PinnedEmbeddedCuaDriverHostError.driverExited
             }

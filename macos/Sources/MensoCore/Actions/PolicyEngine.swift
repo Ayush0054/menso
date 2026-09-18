@@ -307,6 +307,24 @@ public actor PolicyEngine {
     /// runtime request. The action id and content hash make this authority
     /// unusable by another run, tool call, or model-proposed payload.
     public func requireReviewForBoundRequest(_ request: ActionRequest) {
+        registerBoundRequest(request, disposition: .humanReview)
+    }
+
+    /// Only routine navigation from the native task runner may skip review.
+    /// Writes and controls retain review; no model-supplied risk label is used.
+    func authorizeTaskNavigation(_ request: ActionRequest) {
+        guard request.source == .nativeVoice,
+              case let .application(operation) = request.operation,
+              [.openApplication, .focusWindow].contains(operation.kind) else { return }
+        registerBoundRequest(request, disposition: .automatic)
+    }
+
+    func removeTaskRule(for request: ActionRequest) {
+        let id = PolicyRuleID(rawValue: "bound-review:\(request.actionID.rawValue)")
+        configuration = ActionPolicyConfiguration(rules: configuration.rules.filter { $0.id != id })
+    }
+
+    private func registerBoundRequest(_ request: ActionRequest, disposition: PolicyRuleDisposition) {
         guard request.isStructurallyValid, request.expiresAt > now() else { return }
         let target: PolicyTargetConstraint
         switch request.target {
@@ -324,7 +342,7 @@ public actor PolicyEngine {
             semanticToolName: request.operation.semanticToolName,
             allowedSources: [request.source],
             target: target,
-            disposition: .humanReview,
+            disposition: disposition,
             requiredActionID: request.actionID,
             requiredContentHash: request.operation.contentHash,
             expiresAt: request.expiresAt
